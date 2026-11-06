@@ -24,7 +24,7 @@ Inside a module, code is grouped by feature (`scoring/`, `baseline/`, …). Each
 2. `shared/` imports nothing from `modules/`.
 3. Each context owns its own Postgres schema. Cross-schema joins and foreign keys are forbidden. A context references other contexts' data only by id.
 4. Integration between contexts is event-first: a publisher emits a past-tense domain event on the in-process bus, and subscribers keep their own read model. A synchronous facade call is allowed only for queries that need fresh data.
-5. Jira types and HTTP clients live only in `integrations/`. Other contexts never see a Jira field name.
+5. Types, field names and HTTP clients of an external system (Jira, GitHub, …) live only in its anti-corruption layer inside `integrations/`. Other contexts see only product terms from `docs/bc-map.md`.
 
 The rule will be enforced by `eslint-plugin-boundaries` in CI (module 5). A cyclic dependency between modules fails the build.
 

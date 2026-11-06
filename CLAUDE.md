@@ -8,26 +8,28 @@ SaaS for team leads and HR: imports Jira activity, scores each member's monthly 
 - PostgreSQL 16 via Prisma; one schema per bounded context (`identity`, `integrations`, `contribution`, `bonus_review`, `billing`)
 - Jest for unit and integration tests, Supertest for HTTP
 - pnpm (not npm, not yarn)
+- Redis + BullMQ for queued jobs; `@nestjs/event-emitter` with an outbox table per context
 
 ## Commands
 
-- `make dev` — start Postgres in Docker and the API in watch mode (`pnpm start:dev`)
-- `make test` — run all tests (`pnpm test`)
-- Single test file: `pnpm test -- src/modules/contribution/...spec.ts`
-- On Windows without `make`, run the pnpm commands directly.
+Work once `package.json` and `docker-compose.yml` are scaffolded.
+
+- Dev: `docker compose up -d postgres` then `pnpm start:dev` (alias: `make dev`)
+- All tests: `pnpm test` (alias: `make test`)
+- Single test file: `pnpm test src/modules/contribution/<file>.spec.ts`
 
 ## Conventions
 
-- Code, identifiers, commits and docs in English; domain terms exactly as in `docs/bc-map.md` (e.g. `ContributionScore`, never `Rating` or `Points`).
-- Money is integer minor units (`amountCents`) plus ISO currency code. Never floats.
+- Code, identifiers, commits and docs in English; domain terms exactly as in `docs/bc-map.md` (e.g. the score is `ContributionScore`, never `Rating` or `Points`; Jira story points stay `storyPoints`).
+- Money representation rules (Billing and the shared `Money` primitive): `.claude/rules/money.md`.
 - Dates are stored in UTC; a bonus period is a calendar month `YYYY-MM` in the company's timezone.
 - Commits follow Conventional Commits: `feat(contribution): ...`.
 - New behaviour starts with a failing test.
-- Never put real Jira tokens, employee names or salaries in fixtures; use the factories in `test/factories`.
+- Never put real Jira tokens, employee names or salaries in test data.
 
 ## Architecture
 
-Feature-first modular monolith; each bounded context is a NestJS module in `src/modules/<context>/`.
+Feature-first modular monolith; each bounded context is a NestJS module in `src/modules/<context>/`: `identity`, `integrations`, `contribution`, `bonus-review` (schema `bonus_review`), `billing`.
 
 Dependency rule:
 - A context never imports another context's internals. Allowed cross-context imports: `src/modules/<other>/public/` (its facade and published event types) and `src/shared/` only.
@@ -36,4 +38,4 @@ Dependency rule:
 - `src/shared/` holds technical primitives only (ids, clock, money, event bus) and contains no business rules.
 - New context or new cross-context dependency → update `docs/bc-map.md` and add an ADR in `docs/adr/` first.
 
-@ARCHITECTURE.md
+Before adding a module, moving code between modules or touching runtime wiring (jobs, event bus, outbox), read `ARCHITECTURE.md`. It is not loaded by default: the dependency rule above is the part needed in every session.
