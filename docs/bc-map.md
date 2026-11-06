@@ -40,7 +40,8 @@ Events: `JiraConnected`, `IssuesImported`, `WorklogsImported`, `SprintClosed`.
 ### Contribution Scoring (`contribution`)
 Events: `ContributionScored`.
 - **Contribution Score**: a member's weighted result for a month (0–100).
-- **Weighting Policy**: the rules that turn story points, issue type and role into points.
+- **Weighting Policy**: the rules that turn story points, issue type and role into **Weighted Effort**.
+- **Weighted Effort**: the intermediate per-issue value the policy produces; it is never called "points" (see section 5).
 - **Capacity**: a member's available working days in the sprint, adjusted for absences.
 - **Team Baseline**: the team median used for relative comparison and the trend over previous months.
 
@@ -90,4 +91,28 @@ Relationships:
 
 **Chosen: feature-first (modular monolith)**, with one module per context in `src/modules/<context>/`.
 
-Why: there is one developer, five contexts and about 15 core entities. That is too many for **flat** (the folders would mix scoring rules with Jira mapping and billing). **Hexagonal** in every context would mean a lot of ports and adapters for CRUD-heavy contexts like Identity and Billing. Feature-first keeps the boundaries visible and enforceable through `public/` facades. If **Contribution Scoring** grows complex rules, it alone can move to hexagonal later, without restructuring the rest.
+Why: there is one developer, five contexts and about 15 core entities. That is too many for **flat** (the folders would mix scoring rules with Jira mapping and billing). **Hexagonal** in every context would mean a lot of ports and adapters for CRUD-heavy contexts like Identity and Billing. Feature-first keeps the boundaries visible and enforceable through `public/` facades.
+
+Inside each module (one developer changes all of them today):
+
+| Context | Entities | Inner structure now | Why |
+|---|---|---|---|
+| `identity` | 4 (Company, Team, Member, Reviewer) | one folder: handler / service / repo | plain CRUD plus invitations; layers would be empty ceremony |
+| `integrations` | 4 (Connection, Sync Run, Imported Issue, Sprint Snapshot) | one subfolder per provider (`jira/`) with client / mapper / sync service | the complexity is in talking to Jira, not in domain rules; the mapper is the anti-corruption layer |
+| `contribution` | 4 + versioned policies | domain / app / infra | core domain: pure scoring rules that must be unit-tested without a database, and the part that will change most |
+| `bonus_review` | 4 (Bonus Period, Justification, Recommendation, Approval) | one folder: handler / service / repo | a small state machine; becomes domain / app / infra only if approval rules grow |
+| `billing` | 4 (Plan, Subscription, Invoice, Grace Period) | one folder: handler / service / repo, Stripe behind one adapter | generic subdomain, may be replaced by Stripe Billing entirely |
+
+First context to give a full domain / app / infra structure: **Contribution Scoring**. It holds the rules that make the product different, it needs fast tests without Postgres, and it is the only one where a wrong rule silently changes people's bonuses.
+
+## 5. Polysemy: "points"
+
+The word "points" means two different things:
+- **Jira Integration**: `Imported Issue.storyPoints`, the estimate a team put on an issue in Jira (fields next to it: `issueKey`, `issueType`, `assignee`, `statusHistory`). It is Jira's number and is copied as is.
+- **Contribution Scoring**: the old wording "the rules turn story points, issue type and role into points" meant the weighted result of the policy (fields next to it: `role`, `issueType`, `capacity`, `policyVersion`), which is our number and feeds the 0-100 `Contribution Score`.
+
+Decision: rename, not split. The Jira meaning keeps the name `storyPoints` and lives only in `integrations` and in the events it publishes. The scoring meaning is renamed to **Weighted Effort**. "Points" on its own is not a domain term anywhere (CLAUDE.md already forbids `Points` as a name for the score).
+
+## 6. Event without a home
+
+`MemberAbsenceRecorded` (a member was on vacation or sick for some days). **Capacity** in Contribution Scoring is "adjusted for absences", so the event matters, but no context owns it: Jira has no absences, Identity knows who a member is but not their calendar, and it is not decided whether absences come from an HR system integration, from a calendar, or are entered by the team lead. Until that is decided, the event stays unassigned and Capacity uses working days only.
