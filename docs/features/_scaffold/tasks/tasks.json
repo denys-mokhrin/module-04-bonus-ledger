@@ -1,0 +1,167 @@
+{
+  "slug": "_scaffold",
+  "foundation": "docs/architecture-map.md",
+  "smoke_test": "pnpm install --frozen-lockfile && docker compose up -d postgres redis && pnpm db:generate && pnpm db:migrate && pnpm lint && pnpm typecheck && pnpm build && pnpm test all succeed, and the app boots with GET /health returning 200",
+  "notes": [
+    "Do not overwrite CLAUDE.md, ARCHITECTURE.md, docs/bc-map.md or docs/adr/0001-initial-setup.md; keep the command names CLAUDE.md already lists.",
+    "No new bounded contexts: exactly identity, integrations, contribution, bonus-review (schema bonus_review), billing.",
+    "Windows developer machine: every command is a pnpm script; the existing Makefile stays as an alias only.",
+    "Pin exact dependency versions that exist at scaffold time; NestJS 11, Node 22, PostgreSQL 16."
+  ],
+  "tasks": [
+    {
+      "id": "S1",
+      "title": "Create the NestJS 11 project skeleton with the five context modules and the shared kernel folders",
+      "layer": "scaffold",
+      "deps": [],
+      "acs": [],
+      "dod": "pnpm build succeeds with TypeScript strict, and pnpm start boots an app whose AppModule imports exactly the five context modules (each with an empty public/index.ts and the inner layout from docs/bc-map.md §4) and serves GET /health → 200",
+      "files_hint": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "nest-cli.json",
+        "src/main.ts",
+        "src/app.module.ts",
+        "src/health.controller.ts",
+        "src/modules/identity/",
+        "src/modules/integrations/",
+        "src/modules/contribution/",
+        "src/modules/bonus-review/",
+        "src/modules/billing/",
+        "src/shared/"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Wire the Jest harness: colocated unit specs, integration/e2e under test/, Supertest smoke test",
+      "layer": "scaffold",
+      "deps": ["S1"],
+      "acs": [],
+      "dod": "pnpm test runs every suite and is green; pnpm test:unit runs only src/**/*.spec.ts without Docker; pnpm test:int runs test/**/*.{int,e2e}-spec.ts including a Supertest e2e asserting GET /health → 200; pnpm test src/<path>.spec.ts runs a single file",
+      "files_hint": [
+        "package.json",
+        "jest.config.ts",
+        "test/jest-int.config.ts",
+        "test/health.e2e-spec.ts",
+        "test/fixtures/"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Add docker-compose (Postgres 16, Redis 7) and validated environment configuration",
+      "layer": "scaffold",
+      "deps": ["S1"],
+      "acs": [],
+      "dod": "docker compose up -d postgres redis reports both healthy; the app refuses to boot with a clear message when DATABASE_URL or REDIS_URL is missing or malformed (unit-tested), and .env.example lists every variable with a fake value",
+      "files_hint": [
+        "docker-compose.yml",
+        ".env.example",
+        "src/shared/config/"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Set up Prisma per context: five schema files, five generated clients inside the modules, five migration histories",
+      "layer": "scaffold",
+      "deps": ["S3"],
+      "acs": [],
+      "dod": "pnpm db:generate produces five clients into gitignored src/modules/<context>/**/db/generated/; pnpm db:migrate applies an initial migration per context to a fresh database so that each of the schemas identity, integrations, contribution, bonus_review, billing exists with its own _prisma_migrations table; each initial migration has a down.sql that reverts it cleanly; an integration test proves every context client connects to its own schema (verifies ADR 0002)",
+      "files_hint": [
+        "package.json",
+        ".gitignore",
+        "scripts/db.ts",
+        "src/modules/identity/db/",
+        "src/modules/integrations/db/",
+        "src/modules/contribution/infra/db/",
+        "src/modules/bonus-review/db/",
+        "src/modules/billing/db/",
+        "test/db/"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Implement shared primitives: UUIDv7 ids, injectable Clock, Money",
+      "layer": "scaffold",
+      "deps": ["S2"],
+      "acs": [],
+      "dod": "unit specs pass for newId() (valid UUIDv7, time-ordered), SystemClock/FixedClock behind a Clock injection token, and Money (integer amountCents + ISO currency, rejects non-integers and currency mismatch); src/shared imports nothing from src/modules",
+      "files_hint": [
+        "src/shared/ids/",
+        "src/shared/clock/",
+        "src/shared/money/"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Add DomainError base and the global exception filter with the error envelope",
+      "layer": "scaffold",
+      "deps": ["S2"],
+      "acs": [],
+      "dod": "an e2e spec shows a thrown DomainError subclass maps to its HTTP status with body { error: { code, message } }, and an unknown error maps to 500 without a stack trace in the body",
+      "files_hint": [
+        "src/shared/errors/",
+        "src/main.ts",
+        "test/errors.e2e-spec.ts"
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Configure ESLint + Prettier with eslint-plugin-boundaries enforcing the cross-context import rule",
+      "layer": "scaffold",
+      "deps": ["S1"],
+      "acs": [],
+      "dod": "pnpm lint is green on the skeleton; a lint self-test runs ESLint over fixture files and fails on (a) a module importing another module's non-public path, (b) a module importing another module's generated Prisma client, (c) src/shared importing src/modules, (d) an import cycle between modules — while an import of modules/<other>/public/** and of shared/** passes",
+      "files_hint": [
+        "eslint.config.mjs",
+        ".prettierrc",
+        "package.json",
+        "test/lint/"
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Wire BullMQ on Redis and the in-process event bus",
+      "layer": "scaffold",
+      "deps": ["S3"],
+      "acs": [],
+      "dod": "the app boots with @nestjs/bullmq connected to Redis and @nestjs/event-emitter registered; an integration spec enqueues a no-op job and observes it completed; GET /health reports Postgres and Redis status",
+      "files_hint": [
+        "src/app.module.ts",
+        "src/shared/events/",
+        "src/shared/jobs/",
+        "src/health.controller.ts",
+        "test/jobs.int-spec.ts"
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Implement the per-context outbox: transactional write, relay job, consumer deduplication by eventId",
+      "layer": "scaffold",
+      "deps": ["S4", "S5", "S8"],
+      "acs": [],
+      "dod": "an integration spec writes a test event to one context's outbox inside a transaction, the relay publishes it on the event bus and a subscriber receives it once; writing the same eventId twice stores one row, redelivering it is ignored by the consumer, and a rolled-back transaction publishes nothing",
+      "files_hint": [
+        "src/shared/events/",
+        "src/modules/identity/db/",
+        "src/modules/integrations/db/",
+        "src/modules/contribution/infra/db/",
+        "src/modules/bonus-review/db/",
+        "src/modules/billing/db/",
+        "test/outbox.int-spec.ts"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Add the GitHub Actions CI workflow",
+      "layer": "scaffold",
+      "deps": ["S2", "S4", "S7"],
+      "acs": [],
+      "dod": "the workflow file is valid (actionlint passes if available), uses Node 22, pnpm with a frozen lockfile and Postgres 16 + Redis service containers, and runs exactly the package.json scripts db:generate, lint, typecheck, build, db:migrate, test",
+      "files_hint": [
+        ".github/workflows/ci.yml"
+      ]
+    }
+  ]
+}
