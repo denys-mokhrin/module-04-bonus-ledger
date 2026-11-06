@@ -12,8 +12,6 @@ SaaS for team leads and HR: imports Jira activity, scores each member's monthly 
 
 ## Commands
 
-Work once `package.json` and `docker-compose.yml` are scaffolded.
-
 - Dev: `docker compose up -d postgres` then `pnpm start:dev` (alias: `make dev`)
 - All tests: `pnpm test` (alias: `make test`)
 - Single test file: `pnpm test src/modules/contribution/<file>.spec.ts`

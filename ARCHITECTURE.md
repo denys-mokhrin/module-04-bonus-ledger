@@ -50,6 +50,7 @@ Rules 1–3 are enforced by `pnpm lint` (`eslint-plugin-boundaries` + `import-x/
 - API: NestJS HTTP (REST); `GET /health` reports Postgres and Redis. Errors use one envelope `{ error: { code, message } }`.
 - Jobs: Jira sync, scoring and the outbox relay run as BullMQ jobs on Redis, triggered by schedule and by events.
 - Event bus: `@nestjs/event-emitter` in process, with an outbox table per context so events survive restarts (outbox: scaffold task S9, not built yet).
+- Main events, publisher → listener (full list in `docs/bc-map.md`): integrations `IssuesImported`, `WorklogsImported`, `SprintClosed` → contribution; contribution `ContributionScored` → bonus-review; identity `CompanyRegistered` → billing, `TeamMemberInvited` → contribution; bonus-review `BonusPeriodOpened` → integrations; billing `SubscriptionSuspended` → integrations, bonus-review.
 
 ## Growth path
 
