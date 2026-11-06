@@ -11,6 +11,8 @@ coverage/
 # Claude Code: personal, never committed
 CLAUDE.local.md
 .claude/settings.local.json
+.claude/agent-memory-local/
+.claude/instructions-loaded.jsonl
 
 # OS / editor
 .DS_Store

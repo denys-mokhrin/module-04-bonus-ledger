@@ -12,6 +12,8 @@
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/credentials*)",
       "Read(./secrets/**)",
       "Read(~/.aws/**)",
       "Read(~/.ssh/**)",
