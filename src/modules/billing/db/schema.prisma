@@ -1,0 +1,13 @@
+// Prisma schema of the billing context: tables of the "billing" Postgres schema only (ADR 0002).
+// The connection URL comes from prisma.config.ts, which appends ?schema=billing.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "./generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}

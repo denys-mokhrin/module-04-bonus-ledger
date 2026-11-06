@@ -1,0 +1,11 @@
+dist/
+coverage/
+node_modules/
+pnpm-lock.yaml
+**/generated/
+**/migrations/
+# Authored docs and agent instructions are formatted by hand.
+*.md
+docs/
+.claude/
+.notes/

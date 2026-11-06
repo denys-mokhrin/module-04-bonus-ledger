@@ -1,0 +1,7 @@
+# Dependency install scripts pnpm may run. Everything not listed is blocked.
+allowBuilds:
+  '@prisma/engines': true # schema engine for prisma migrate
+  prisma: true
+  esbuild: true # used by tsx
+  '@parcel/watcher': false # optional native file watcher (nest --watch falls back)
+  msgpackr-extract: false # optional native accelerator for bullmq

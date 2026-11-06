@@ -3,6 +3,9 @@ node_modules/
 dist/
 coverage/
 
+# Generated Prisma clients, one per context (pnpm db:generate)
+/src/modules/**/generated/
+
 # Secrets
 .env
 .env.*

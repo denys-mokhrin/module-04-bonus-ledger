@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bonus_ledger
+          POSTGRES_PASSWORD: bonus_ledger
+          POSTGRES_DB: bonus_ledger
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bonus_ledger -d bonus_ledger"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      # Throwaway credentials of the CI service containers above, not secrets.
+      DATABASE_URL: postgresql://bonus_ledger:bonus_ledger@localhost:5432/bonus_ledger
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm (version from package.json packageManager)
+        run: corepack enable
+
+      # Scripts stay on: @prisma/engines fetches the schema engine that db:migrate needs.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - run: pnpm db:generate
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm db:migrate
+      - name: Test (unit, lint self-test, e2e)
+        run: pnpm test
+      - name: Test (integration against Postgres + Redis)
+        run: pnpm test:int
