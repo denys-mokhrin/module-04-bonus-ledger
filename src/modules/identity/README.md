@@ -22,6 +22,11 @@
   - `GET /members/:id` → `200` with the member. Errors: `400 VALIDATION_FAILED` (id is not a uuid), `404 MEMBER_NOT_FOUND`.
   - The service also rejects, for callers that do not come through HTTP: `400 MEMBER_DISPLAY_NAME_REQUIRED`, `400 MEMBER_ROLE_INVALID`.
   - Errors use the shared envelope `{ error: { code, message, details? } }`.
+- `reviewers/`: Reviewer, table `identity.reviewer` (`id`, `companyId`, `displayName`, `email`, `createdAt`). The displayName is trimmed. The email is trimmed and lower-cased by the application before it is stored or looked up, and is unique within a company (unique index on `companyId`, `email`); the same email may exist in another company. The index itself is case-sensitive, so the normalisation in the service is what makes the uniqueness case-insensitive. `companyId` is an id only, with no foreign key yet, because Company does not exist yet. A reviewer is not scored.
+  - `POST /reviewers` with body `{ companyId, displayName, email }` → `201` with the reviewer. Errors: `400 VALIDATION_FAILED`, `409 REVIEWER_EMAIL_TAKEN` (also when the email differs only by case or surrounding spaces). `companyId` comes from the body until auth supplies the tenant.
+  - `GET /reviewers/:id` → `200` with the reviewer. Errors: `400 VALIDATION_FAILED` (id is not a uuid), `404 REVIEWER_NOT_FOUND`.
+  - The service also rejects, for callers that do not come through HTTP: `400 REVIEWER_DISPLAY_NAME_REQUIRED`, `400 REVIEWER_EMAIL_INVALID`.
+  - Errors use the shared envelope `{ error: { code, message, details? } }`.
 
 **Public facade:** `public/`: `TeamDirectory` (look up a team's members and roles by id), not built yet.
 **Schema:** `identity`. Layout: handler / service / repo, grouped by feature; Prisma client in `db/`.
