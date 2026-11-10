@@ -1,0 +1,47 @@
+name: Release notes (draft)
+
+# Drafts the "Unreleased" section of docs/CHANGELOG.md from the commits since the last tag and
+# publishes it as a suggestion: a job summary and a patch artifact. It never commits or pushes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the script needs the tags and the history since the last one
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Draft release notes
+        env:
+          # The key comes only from the repository secret; it is never written to a file or echoed.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RELEASE_NOTES_MAX_TURNS: '10'
+        run: |
+          node scripts/release-notes.mjs > release-notes.json
+          git diff -- docs/CHANGELOG.md > release-notes.patch
+          {
+            echo '### Suggested changelog edit'
+            echo '```diff'
+            cat release-notes.patch
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: |
+            release-notes.json
+            release-notes.patch
