@@ -184,3 +184,28 @@ before saving and lookup; the database compares text exactly.
   check and the insert).
 - That the `MemberRole` enum in `schema.prisma` matches `MEMBER_ROLES` in `member.ts`; only
   typecheck ties them together.
+
+## SDK script: release notes
+
+`scripts/release-notes.mjs` (`pnpm release:notes`), branch `feature-4/release-notes`. A headless
+Claude Code pipeline that drafts the `Unreleased` section of `docs/CHANGELOG.md` from the commits
+since the last tag (`v0.1.0`, the scaffold).
+
+| Requirement | How it is met |
+|---|---|
+| Structured output | `--output-format json --json-schema` with `scripts/release-notes/schema.json`; the script re-checks version, date, tag and that every bullet of the JSON is in the changelog |
+| Explicit turn limit | `--max-turns 10` |
+| Suggestion only | tools limited to `Bash(git log *)`, `Read(docs/**)`, `Edit(docs/CHANGELOG.md)`; nothing is committed, tagged or pushed; a failed check restores the file |
+| Secrets | `ANTHROPIC_API_KEY` only from the environment; in CI from a repository secret |
+
+Runs on 2026-11-10, model `haiku`:
+
+| Run | Result |
+|---|---|
+| normal | 6 turns of 10, 17 s, $0.006; three `Added` bullets (Team, Member, Reviewer endpoints) and one `Fixed`; all checks passed |
+| `--check` | passed, file restored |
+| `RELEASE_NOTES_MAX_TURNS=2` | stopped with "did not finish within --max-turns 2", exit 1, file restored |
+
+In one run the agent tried `cat docs/bc-map.md` through Bash; the tool list denied it and it
+used Read instead. The CI workflow (`release-notes.yml`, manual start) is written but has not
+run: the repository has no `ANTHROPIC_API_KEY` secret yet.
