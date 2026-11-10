@@ -78,4 +78,74 @@ prompts only. The prompt texts are kept verbatim in `.notes/capstone/f1-prompts/
 
 ## Feature 2: Member, with the plugin
 
-_Filled in after stage 3._
+Session `8d8ffc91`, 2026-11-10, 21:13:42 – 21:20:42 local time (the control check of the hook ran
+after that, until 21:22:40, and is not counted). One Claude Code session started with
+`claude --plugin-dir ../ledger-slice`, plugin version 0.1.0, same machine, same database, same
+permission mode as feature 1. Times are measured the same way as for feature 1.
+
+### Metrics, next to feature 1
+
+| Metric | Feature 1, by hand | Feature 2, plugin | Ratio |
+|---|---|---|---|
+| First prompt → all four checks green | 10 min 28 s | 7 min 00 s | 1.5× faster |
+| Time the agent was working | 7 min 25 s | 4 min 32 s (0:41 + 1:02 + 2:07 + 0:42) | 1.6× faster |
+| Time between prompts | 5 min 17 s | 2 min 28 s | 2.1× less |
+| What I typed | 5 free-form prompts written as files, plus 3 one-line answers | 3 plugin commands, plus 1 one-line answer | |
+| Tool calls made by the agent | 52 | 31 | 1.7× fewer |
+| Questions the agent asked before it could go on | 4 decisions | 0 decisions, 1 false stop (Docker) | |
+| Result | 12 new files, 484 lines; `pnpm test` 53, `pnpm test:int` 28 | 9 new files, 575 lines; `pnpm test` 69, `pnpm test:int` 47 | |
+
+**The target was 2× and I did not reach it: the slice was 1.5× faster.** The plugin removed the
+exploration prompt, the four decisions and the hand-written step prompts. It did not shorten the
+part that is real work: writing 358 lines of specs and running the database and the checks.
+At least 54 s of the 7 minutes (the pause between steps 1 and 1a) went into the false stop
+described below, plus the time the agent spent checking Docker and writing the stop report.
+Without it the run would have taken about 6 minutes, still short of the 2× line (5 min 14 s).
+That is an estimate, not a measurement.
+
+### Steps, in order
+
+| # | What I typed | What happened | Agent time |
+|---|---|---|---|
+| 1 | `/ledger-slice:slice-scaffold identity Member "teamId, displayName, role (Dev, QA, Lead, PM); displayName unique inside a team"` | model + enum written, then the agent stopped: "Docker isn't running" | 0:41 |
+| 1a | "Postgres is already up on localhost:5432 … Continue from step 3." | migration, `down.sql`, rollback proven through `/ledger-slice:rollback-migration`, typecheck | 1:02 |
+| 2 | `/ledger-slice:slice-build identity Member "POST /members, GET /members/:id; reject an unknown team"` | failing specs (unit: modules missing; integration: 19 of 19 got 404), then type, errors, repo, service, controller; 16 + 19 tests green | 2:07 |
+| 3 | `/ledger-slice:slice-ship identity Member` | README, four checks green, `git status`, `git diff --stat`, commit message | 0:42 |
+
+The plugin was used in four key steps: the three skills above and the `rollback-migration`
+command, which the agent called by itself inside step 1a. In step 2 stray characters got into
+the input line before the slash, so the text arrived as a plain message; the skill still started,
+through its description (auto-activation), with the same arguments.
+
+### Hooks: what they caught
+
+| When | Hook | What it blocked | Verdict |
+|---|---|---|---|
+| 21:15:30 | `migration-guard` | a Bash heredoc that wrote `down.sql`; the header comment of that file mentions `prisma migrate resolve --rolled-back` | **false positive**: the hook matched text that was only being written to a file. The agent wrote the file with the Write tool instead. Fixed after the run: heredoc bodies, here-strings and comment lines are removed before matching; new self-test. |
+| 21:22:27 | `boundary-guard` | an Edit adding `import { BillingDb } from '../../billing/db/client'` to `members.service.ts` | **control check, not a caught mistake**: after the slice was green I asked the agent to try this import on purpose. The hook rejected the edit before the file changed. |
+
+During the real work the agent made no cross-context import and never tried the forbidden Prisma
+commands, so no hook stopped a real mistake in this feature. Both entries are in
+`.claude/ledger-slice-hook.log` (local, not committed).
+
+### What the plugin got wrong, and the fix
+
+| Problem | Cost | Fix in the plugin |
+|---|---|---|
+| `slice-scaffold` said the migration "needs a running Postgres (`docker compose up -d postgres redis`)". The agent checked Docker Desktop on Windows, which was not started, and stopped, although Postgres was running in the Docker engine inside WSL and `DATABASE_URL` was set. | one extra message and about 1 minute | the skill now says: run the migration command; do not check Docker or `.env` first; stop only if the command itself fails to connect |
+| `migration-guard` false positive (above) | one retry by the agent | text that is only written is ignored |
+| `/ledger-slice:rollback-migration` used `$1` and `$2`; the arguments landed in the wrong places and the agent had to take them from its own call | none in time; the procedure itself worked | switched to `$ARGUMENTS[0]` and `$ARGUMENTS[1]`; not yet re-run in a session |
+
+### Decisions the agent made that were not in the plugin
+
+- An unknown team in the body of `POST /members` returns 422 `MEMBER_TEAM_UNKNOWN`, not 404; a
+  team of another company gets the same answer. I kept it.
+- `Member.teamId` is a real foreign key to `team` (same schema, `ON DELETE RESTRICT`).
+- `Team.leadMemberId` still has no foreign key; that is a separate migration.
+
+### Not covered by a test
+
+- The repo's handling of `P2002` (duplicate name in a race) and `P2003` (team deleted between the
+  check and the insert).
+- That the `MemberRole` enum in `schema.prisma` matches `MEMBER_ROLES` in `member.ts`; only
+  typecheck ties them together.
