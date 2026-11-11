@@ -136,6 +136,41 @@ commands, so no hook stopped a real mistake in this feature. Both entries are in
 | `migration-guard` false positive (above) | one retry by the agent | text that is only written is ignored |
 | `/ledger-slice:rollback-migration` used `$1` and `$2`; the arguments landed in the wrong places and the agent had to take them from its own call | none in time; the procedure itself worked | switched to `$ARGUMENTS[0]` and `$ARGUMENTS[1]`; not yet re-run in a session |
 
+### Second run with the fixed plugin: Reviewer
+
+Feature 2 missed the 2× target and exposed three plugin defects, so after fixing them I measured
+once more on a new entity instead of repeating `Member` (a repeat would only measure a task that
+is already solved). Entity: `Reviewer` in `identity` (`displayName`, `email`; email unique inside
+a company), branch `feature-3/identity-reviewer`. Session `053a372e`, 2026-11-10,
+21:26:36 – 21:31:57, same machine, database and permission mode.
+
+| Metric | Feature 1, by hand | Feature 2, plugin 0.1.0 | Reviewer, fixed plugin |
+|---|---|---|---|
+| First prompt → all four checks green | 10 min 28 s | 7 min 00 s (1.5×) | 5 min 21 s (1.96×) |
+| Time the agent was working | 7 min 25 s | 4 min 32 s | 4 min 01 s (1:07 + 2:20 + 0:34) |
+| Time between prompts | 5 min 17 s | 2 min 28 s | 1 min 20 s |
+| What I typed | 5 prompts + 3 answers | 3 commands + 1 answer | 3 commands, nothing else |
+| Tool calls made by the agent | 52 | 31 | 22 |
+| False stops, hook blocks | — | 1 stop, 1 false block | none |
+| Result | 12 files, 484 lines | 9 files, 575 lines | 9 files, 491 lines; `pnpm test` 83, `pnpm test:int` 65 |
+
+**1.96×: seven seconds short of 2× (5 min 14 s).** I report it as "about two times", not as the
+target met. What to keep in mind when reading the numbers:
+
+- `Reviewer` has the same shape as `Team` from feature 1 (two fields, one uniqueness rule, no
+  reference to another table), so this pair is the fairest comparison. `Member` was a bit larger
+  (an enum and a foreign key).
+- The time between prompts includes a fixed wait of 20 to 30 s per step in which I make sure the
+  agent has really finished. It is in all three runs.
+- By the third entity the repository holds two finished slices to mirror, so part of the gain is
+  the code base, not only the plugin.
+- No hook fired in this run and the agent did the rollback by the written procedure without
+  calling `/ledger-slice:rollback-migration`, so the argument fix of that command is still not
+  exercised in a session.
+
+Decision the agent raised and I accepted: the email is trimmed and lower-cased by the application
+before saving and lookup; the database compares text exactly.
+
 ### Decisions the agent made that were not in the plugin
 
 - An unknown team in the body of `POST /members` returns 422 `MEMBER_TEAM_UNKNOWN`, not 404; a
@@ -149,3 +184,28 @@ commands, so no hook stopped a real mistake in this feature. Both entries are in
   check and the insert).
 - That the `MemberRole` enum in `schema.prisma` matches `MEMBER_ROLES` in `member.ts`; only
   typecheck ties them together.
+
+## SDK script: release notes
+
+`scripts/release-notes.mjs` (`pnpm release:notes`), branch `feature-4/release-notes`. A headless
+Claude Code pipeline that drafts the `Unreleased` section of `docs/CHANGELOG.md` from the commits
+since the last tag (`v0.1.0`, the scaffold).
+
+| Requirement | How it is met |
+|---|---|
+| Structured output | `--output-format json --json-schema` with `scripts/release-notes/schema.json`; the script re-checks version, date, tag and that every bullet of the JSON is in the changelog |
+| Explicit turn limit | `--max-turns 10` |
+| Suggestion only | tools limited to `Bash(git log *)`, `Read(docs/**)`, `Edit(docs/CHANGELOG.md)`; nothing is committed, tagged or pushed; a failed check restores the file |
+| Secrets | `ANTHROPIC_API_KEY` only from the environment; in CI from a repository secret |
+
+Runs on 2026-11-10, model `haiku`:
+
+| Run | Result |
+|---|---|
+| normal | 6 turns of 10, 17 s, $0.006; three `Added` bullets (Team, Member, Reviewer endpoints) and one `Fixed`; all checks passed |
+| `--check` | passed, file restored |
+| `RELEASE_NOTES_MAX_TURNS=2` | stopped with "did not finish within --max-turns 2", exit 1, file restored |
+
+In one run the agent tried `cat docs/bc-map.md` through Bash; the tool list denied it and it
+used Read instead. The CI workflow (`release-notes.yml`, manual start) is written but has not
+run: the repository has no `ANTHROPIC_API_KEY` secret yet.
