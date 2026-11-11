@@ -11,3 +11,19 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+/// A group of members with one team lead (docs/bc-map.md). Belongs to one Company (the tenant).
+/// Ids and createdAt are set by the application (newId(), Clock), never by the database (ADR 0002).
+model Team {
+  id           String   @id @db.Uuid
+  /// Tenant id. No foreign key yet: Company does not exist. Once it does (same identity schema), add one.
+  companyId    String   @db.Uuid
+  name         String
+  /// Member id only; Member does not exist yet, so no relation.
+  leadMemberId String?  @db.Uuid
+  /// UTC.
+  createdAt    DateTime @db.Timestamptz(3)
+
+  @@unique([companyId, name])
+  @@map("team")
+}
