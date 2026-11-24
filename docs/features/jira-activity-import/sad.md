@@ -63,34 +63,39 @@ target_surfaces: []
 
 ## 3. Context and scope
 
-<!-- 🎯 Навіщо: малює КОРДОН СИСТЕМИ — хто з нею говорить ззовні, де закінчується зона довіри. -->
-<!--           Без §3 §5 і §8 (авторизація) розпливаються — неясно, що «всередині», а що «зовні». -->
-<!-- 📋 Що писати: 2-3 речення бізнес-контексту + таблиця зовнішніх систем + Mermaid C4Context. -->
-<!-- 📌 Приклад: «зовнішні — нема (свідома відмова від third-party у v1)» — це теж рішення.   -->
-<!-- Кордон довіри (trust boundary) — лінія, за якою ти не довіряєш даним без перевірки.       -->
+Bonus Ledger reads each Team's activity from the Team's Jira Cloud site and hands it to Contribution Scoring; nothing is written back to Jira. The trust boundary is the Jira Cloud API: everything that comes back is mapped and validated in the `integrations` anti-corruption layer before it becomes an Imported Issue or Worklog.
 
-<Business context in 2-3 sentences. What the system does for whom.>
+<!-- brownfield: the repo holds the target foundation only (architecture-map mode greenfield-bootstrap); contexts and conventions come from the map. -->
 
 **External systems (in / out):**
 
 | Actor or system | Type | Interaction |
 |---|---|---|
-| <e.g. IC> | Person | Creates goals, adds checkpoints |
-| <e.g. notification-service> | System (internal) | Receives cron registration |
-| <e.g. Identity Provider> | System (external) | Provides JWT tokens |
+| Team Lead | Person | Connects and re-authorises the Jira Site, picks Jira Projects, reads Import Health, matches Jira Users |
+| HR Reviewer | Person | Reads Import Health and the Final Pass outcome |
+| Member | Person | Indirect: their Jira work is attributed to them |
+| Jira Cloud (Atlassian) | System (external) | Authorisation (read-only), issues, Worklogs, field metadata, deleted-worklog feed |
+| Bonus Review | System (internal context) | Publishes Bonus Period state changes the import follows |
+| Contribution Scoring | System (internal context) | Consumes imported activity changes and attribution |
+| Billing | System (internal context) | Publishes subscription suspension and reactivation |
+| Identity & Teams | System (internal context) | Answers who is Team Lead / Member / HR Reviewer of which Team and Company |
 
 **C4 Context (L1):**
 
 ```mermaid
 C4Context
-    title <system> — System Context
+    title Bonus Ledger: Jira activity import - System Context
 
-    Person(user, "<User>", "<role + intent>")
-    System(system, "<Our System>", "<one-sentence description>")
-    System_Ext(ext, "<External system>", "<one-sentence description>")
+    Person(lead, "Team Lead", "Connects the Jira Site, fixes Import Alerts, matches Jira Users")
+    Person(hr, "HR Reviewer", "Reads Import Health and the Final Pass outcome")
+    Person(member, "Member", "Has Jira work attributed for the bonus")
+    System(ledger, "Bonus Ledger", "Imports Jira activity per Team and Bonus Period, scores and reviews bonuses")
+    System_Ext(jira, "Jira Cloud", "Issues, Worklogs, field metadata of the Team's Jira Site")
 
-    Rel(user, system, "<interaction>", "<protocol>")
-    Rel(system, ext, "<interaction>", "<protocol>")
+    Rel(lead, ledger, "Connects, reads Import Health, matches users", "HTTPS/REST")
+    Rel(hr, ledger, "Reads Import Health", "HTTPS/REST")
+    Rel(member, jira, "Logs work and resolves issues", "Jira UI")
+    Rel(ledger, jira, "Reads activity with a read-only grant", "HTTPS")
 ```
 
 ## 4. Solution strategy
