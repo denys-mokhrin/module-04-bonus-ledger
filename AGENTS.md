@@ -73,6 +73,6 @@ The architecture overview below is imported into every session; read the full ma
 
 ## Scaffold status
 
-- Built: NestJS skeleton, five context modules, `GET /health`, env validation, Prisma per context, shared primitives, error envelope, lint boundaries, BullMQ + event bus wiring, CI.
-- Deferred: scaffold task S9 (per-context outbox, relay job, consumer dedup). Until it exists, do not publish cross-context events; build S9 first in a session with Docker.
+- Built: NestJS skeleton, five context modules, `GET /health`, env validation, Prisma per context, shared primitives, error envelope, lint boundaries, BullMQ + event bus wiring, CI, per-context outbox (S9: `writeToOutbox`, `OutboxRelay` + `outbox-relay` job, `consumeOnce`).
+- Publish a cross-context event only through `writeToOutbox` inside the business transaction; listeners wrap their work in `consumeOnce`.
 - Verified only with Docker (not yet run): `docker compose` health, `pnpm db:migrate`, `pnpm test:int`.

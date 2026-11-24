@@ -7,5 +7,5 @@ Technical primitives used by every module. No business rules and no imports from
 - `clock/`: `Clock` behind the `CLOCK` token (`SystemClock`, `FixedClock` for tests)
 - `money/`: `Money` (integer `amountCents` + ISO currency)
 - `errors/`: `DomainError` base and the global error-envelope filter
-- `events/`: the in-process event bus (the per-context outbox is still to come, scaffold task S9)
+- `events/`: the in-process event bus and the per-context outbox: `writeToOutbox`, `OutboxRelay` (BullMQ `outbox-relay`), `consumeOnce`
 - `jobs/`: the root BullMQ connection
