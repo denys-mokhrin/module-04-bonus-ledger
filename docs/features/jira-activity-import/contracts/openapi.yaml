@@ -1,0 +1,519 @@
+openapi: 3.1.0
+info:
+  title: Bonus Ledger — Jira activity import
+  version: 0.1.0
+  description: >
+    Lets a Team Lead connect the Team's Jira Cloud site once, keep its Jira Projects current,
+    read Import Health and match Jira Users to Members, so the open Bonus Period has its Jira
+    activity without manual copying (PRD §1). Sync Runs themselves are scheduled jobs and have
+    no endpoint (PRD §3: no manual sync); their async contract is in events.md.
+servers:
+  - url: /api/v1
+security:
+  - BearerAuth: []
+tags:
+  - name: connection
+  - name: import-health
+  - name: jira-users
+
+paths:
+  /teams/{teamId}/jira-connection/authorizations:
+    post:
+      tags: [connection]
+      operationId: startJiraAuthorization
+      summary: Start a read-only Jira Cloud grant for the Team (US-01, AC-01, AC-16)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartAuthorizationRequest' }
+            example: { purpose: connect }
+      responses:
+        '201':
+          description: Authorization started; send the Team Lead to authorize_url
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Authorization' }
+              example: { authorization_id: 0193a1b2-0000-7000-8000-000000000101, authorize_url: 'https://auth.example.test/authorize?state=abc', status: pending }
+        '404': { $ref: '#/components/responses/TeamNotFound' }
+        '409': { $ref: '#/components/responses/ConnectionExists' }
+        '429': { $ref: '#/components/responses/TooManyAttempts' }
+
+  /teams/{teamId}/jira-connection/authorizations/{authorizationId}/projects:
+    get:
+      tags: [connection]
+      operationId: listGrantedJiraProjects
+      summary: List Jira Projects visible to a completed grant (US-01)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/AuthorizationId'
+      responses:
+        '200':
+          description: Projects of the granted Jira Site
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JiraProjectList' }
+              example: { jira_site_url: 'https://team.example.test', items: [ { jira_project_id: '10001', jira_project_key: ALPHA } ] }
+        '404': { $ref: '#/components/responses/AuthorizationNotFound' }
+        '409': { $ref: '#/components/responses/AuthorizationPending' }
+
+  /teams/{teamId}/jira-connection:
+    post:
+      tags: [connection]
+      operationId: createJiraConnection
+      summary: Finish connecting with the picked Jira Projects (US-01, AC-01, AC-02, AC-04)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConnectionRequest' }
+            example: { authorization_id: 0193a1b2-0000-7000-8000-000000000101, jira_project_ids: ['10001', '10002'] }
+      responses:
+        '201':
+          description: Connection recorded; first Sync Run scheduled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+              example:
+                id: 0193a1b2-0000-7000-8000-000000000201
+                team_id: 0193a1b2-0000-7000-8000-000000000001
+                jira_site_url: 'https://team.example.test'
+                authorised_at: '2026-11-24T10:00:00Z'
+                projects: [ { jira_project_id: '10001', jira_project_key: ALPHA, story_point_field_found: true } ]
+        '404': { $ref: '#/components/responses/TeamNotFound' }
+        '409': { $ref: '#/components/responses/ConnectionExists' }
+        '422': { $ref: '#/components/responses/NoProjectPicked' }
+    get:
+      tags: [connection]
+      operationId: getJiraConnection
+      summary: Read the Team's Connection (US-01, AC-03)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      responses:
+        '200':
+          description: The Connection (never contains the credential)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        '404': { $ref: '#/components/responses/ConnectionNotFound' }
+
+  /teams/{teamId}/jira-connection/grant:
+    put:
+      tags: [connection]
+      operationId: reauthoriseJiraConnection
+      summary: Re-authorise the existing Connection to the same Jira Site (US-05, AC-16)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReauthoriseRequest' }
+            example: { authorization_id: 0193a1b2-0000-7000-8000-000000000102 }
+      responses:
+        '200':
+          description: Grant replaced; checkpoints of Open periods reset; projects and matches kept
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        '404': { $ref: '#/components/responses/ConnectionNotFound' }
+        '409': { $ref: '#/components/responses/AuthorizationPending' }
+        '422': { $ref: '#/components/responses/DifferentJiraSite' }
+
+  /teams/{teamId}/jira-connection/projects:
+    post:
+      tags: [connection]
+      operationId: addJiraProject
+      summary: Add a Jira Project of the connected site (US-02, AC-05)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddProjectRequest' }
+            example: { jira_project_id: '10003' }
+      responses:
+        '201':
+          description: Project added; next Sync Run imports whole Open periods
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectionProject' }
+        '404': { $ref: '#/components/responses/ConnectionNotFound' }
+        '409': { $ref: '#/components/responses/ProjectAlreadyAdded' }
+
+  /teams/{teamId}/jira-connection/projects/{jiraProjectId}:
+    delete:
+      tags: [connection]
+      operationId: removeJiraProject
+      summary: Remove a Jira Project; its activity stops counting in Open periods (US-02, AC-06, AC-27)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - name: jiraProjectId
+          in: path
+          required: true
+          schema: { type: string, maxLength: 32 }
+      responses:
+        '204': { description: Project removed }
+        '404': { $ref: '#/components/responses/ConnectionNotFound' }
+        '409': { $ref: '#/components/responses/LastProject' }
+
+  /teams/{teamId}/import-health:
+    get:
+      tags: [import-health]
+      operationId: getImportHealth
+      summary: Read the Team's Import Health (US-04, US-07, AC-13, AC-14, AC-23)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      responses:
+        '200':
+          description: Import Health; read-only for an HR Reviewer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportHealth' }
+              example:
+                last_successful_sync_run_at: '2026-11-24T03:10:00Z'
+                import_paused_by_subscription: false
+                open_alerts: [ { id: 0193a1b2-0000-7000-8000-000000000301, kind: unmatched_jira_user, subject: 'Test User', opened_at: '2026-11-24T03:12:00Z' } ]
+                periods: [ { period: '2026-11', state: open, final_pass: not_due, projects: [ { jira_project_key: ALPHA, imported_issues: 42, worklogs: 130 } ] } ]
+        '404': { $ref: '#/components/responses/ConnectionNotFound' }
+
+  /teams/{teamId}/jira-users:
+    get:
+      tags: [jira-users]
+      operationId: listJiraUsers
+      summary: List Jira Users seen by the Connection (US-06, AC-25)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - name: status
+          in: query
+          schema: { type: string, enum: [unmatched, matched, not_on_team] }
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Cursor page of Jira Users
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JiraUserPage' }
+        '404': { $ref: '#/components/responses/ConnectionNotFound' }
+
+  /teams/{teamId}/jira-users/{jiraUserId}/match:
+    put:
+      tags: [jira-users]
+      operationId: matchJiraUser
+      summary: Match a Jira User to a Member; Open periods re-attributed at once (US-06, US-08, AC-19, AC-20, AC-21, AC-29)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/JiraUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MatchRequest' }
+            example: { member_id: 0193a1b2-0000-7000-8000-000000000011 }
+      responses:
+        '200':
+          description: Match saved and recorded with who and when
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JiraUser' }
+        '404': { $ref: '#/components/responses/MemberOrJiraUserNotFound' }
+        '409': { $ref: '#/components/responses/MemberAlreadyMatched' }
+    delete:
+      tags: [jira-users]
+      operationId: unmatchJiraUser
+      summary: Remove a wrong match (US-06, AC-29)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/JiraUserId'
+      responses:
+        '200':
+          description: Match removed and recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JiraUser' }
+        '404': { $ref: '#/components/responses/MemberOrJiraUserNotFound' }
+
+  /teams/{teamId}/jira-users/{jiraUserId}/not-on-team:
+    put:
+      tags: [jira-users]
+      operationId: markJiraUserNotOnTeam
+      summary: Mark a Jira User as not on this Team (US-06, AC-28)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/JiraUserId'
+      responses:
+        '200':
+          description: Marked; unmatched-user alert closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JiraUser' }
+        '404': { $ref: '#/components/responses/MemberOrJiraUserNotFound' }
+    delete:
+      tags: [jira-users]
+      operationId: unmarkJiraUserNotOnTeam
+      summary: Undo the not-on-this-Team mark (US-06, AC-28)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/JiraUserId'
+      responses:
+        '200':
+          description: Mark removed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JiraUser' }
+        '404': { $ref: '#/components/responses/MemberOrJiraUserNotFound' }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TeamId:
+      name: teamId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Uuid' }
+    AuthorizationId:
+      name: authorizationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Uuid' }
+    JiraUserId:
+      name: jiraUserId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Uuid' }
+    After:
+      name: after
+      in: query
+      schema: { $ref: '#/components/schemas/Uuid' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+
+  schemas:
+    Uuid: { type: string, format: uuid, description: UUIDv7 }
+    Period: { type: string, pattern: '^\d{4}-\d{2}$', maxLength: 7, description: Bonus Period YYYY-MM in the company timezone }
+    StartAuthorizationRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose]
+      properties:
+        purpose: { type: string, enum: [connect, reauthorise] }
+    Authorization:
+      type: object
+      additionalProperties: false
+      required: [authorization_id, authorize_url, status]
+      properties:
+        authorization_id: { $ref: '#/components/schemas/Uuid' }
+        authorize_url: { type: string, format: uri }
+        status: { type: string, enum: [pending, granted] }
+    JiraProject:
+      type: object
+      additionalProperties: false
+      required: [jira_project_id, jira_project_key]
+      properties:
+        jira_project_id: { type: string, maxLength: 32 }
+        jira_project_key: { type: string, maxLength: 32 }
+    JiraProjectList:
+      type: object
+      additionalProperties: false
+      required: [jira_site_url, items]
+      properties:
+        jira_site_url: { type: string, format: uri }
+        items: { type: array, items: { $ref: '#/components/schemas/JiraProject' } }
+    CreateConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [authorization_id, jira_project_ids]
+      properties:
+        authorization_id: { $ref: '#/components/schemas/Uuid' }
+        jira_project_ids: { type: array, items: { type: string, maxLength: 32 } }
+    ReauthoriseRequest:
+      type: object
+      additionalProperties: false
+      required: [authorization_id]
+      properties:
+        authorization_id: { $ref: '#/components/schemas/Uuid' }
+    AddProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [jira_project_id]
+      properties:
+        jira_project_id: { type: string, maxLength: 32 }
+    ConnectionProject:
+      type: object
+      additionalProperties: false
+      required: [jira_project_id, jira_project_key, story_point_field_found]
+      properties:
+        jira_project_id: { type: string, maxLength: 32 }
+        jira_project_key: { type: string, maxLength: 32 }
+        story_point_field_found: { type: boolean, description: 'false when connection_projects.story_point_field_id is NULL (AC-17)' }
+    Connection:
+      type: object
+      additionalProperties: false
+      required: [id, team_id, jira_site_url, authorised_at, projects]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        team_id: { $ref: '#/components/schemas/Uuid' }
+        jira_site_url: { type: string, format: uri }
+        authorised_at: { type: string, format: date-time }
+        projects: { type: array, items: { $ref: '#/components/schemas/ConnectionProject' } }
+    ImportAlert:
+      type: object
+      additionalProperties: false
+      required: [id, kind, subject, opened_at]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        kind: { type: string, enum: [access_lost, story_point_field_missing, unmatched_jira_user, quiet_project] }
+        subject: { type: string, maxLength: 128 }
+        opened_at: { type: string, format: date-time }
+    ProjectActivity:
+      type: object
+      additionalProperties: false
+      required: [jira_project_key, imported_issues, worklogs]
+      properties:
+        jira_project_key: { type: string, maxLength: 32 }
+        imported_issues: { type: integer, minimum: 0 }
+        worklogs: { type: integer, minimum: 0 }
+    PeriodHealth:
+      type: object
+      additionalProperties: false
+      required: [period, state, final_pass, projects]
+      properties:
+        period: { $ref: '#/components/schemas/Period' }
+        state: { type: string, enum: [open, in_review, closed] }
+        final_pass: { type: string, enum: [not_due, pending_retry, succeeded, failed] }
+        final_pass_finished_at: { type: [string, 'null'], format: date-time }
+        projects: { type: array, items: { $ref: '#/components/schemas/ProjectActivity' } }
+    ImportHealth:
+      type: object
+      additionalProperties: false
+      required: [last_successful_sync_run_at, import_paused_by_subscription, open_alerts, periods]
+      properties:
+        last_successful_sync_run_at: { type: [string, 'null'], format: date-time }
+        import_paused_by_subscription: { type: boolean }
+        open_alerts: { type: array, items: { $ref: '#/components/schemas/ImportAlert' } }
+        periods: { type: array, items: { $ref: '#/components/schemas/PeriodHealth' } }
+    JiraUser:
+      type: object
+      additionalProperties: false
+      required: [id, jira_account_id, display_name, member_id, not_on_team]
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        jira_account_id: { type: string, maxLength: 128 }
+        display_name: { type: string, maxLength: 255 }
+        member_id: { type: [string, 'null'], format: uuid }
+        not_on_team: { type: boolean }
+    JiraUserPage:
+      type: object
+      additionalProperties: false
+      required: [items, has_next, has_prev, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/JiraUser' } }
+        has_next: { type: boolean }
+        has_prev: { type: boolean }
+        next_cursor: { type: [string, 'null'], format: uuid }
+    MatchRequest:
+      type: object
+      additionalProperties: false
+      required: [member_id]
+      properties:
+        member_id: { $ref: '#/components/schemas/Uuid' }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: { type: string, description: 'stable UPPER_SNAKE code from DomainError (.claude/rules/openapi.md overrides)' }
+            message: { type: string }
+            details: { type: object }
+
+  responses:
+    TeamNotFound:
+      description: Team unknown, or the caller is not its Team Lead (same answer, AC-03)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_TEAM_NOT_FOUND, message: Team not found } }
+    ConnectionNotFound:
+      description: No Connection, or the caller may not see it (same answer, AC-03, AC-14)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_CONNECTION_NOT_FOUND, message: Connection not found } }
+    AuthorizationNotFound:
+      description: Authorization unknown or expired
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_AUTHORIZATION_NOT_FOUND, message: Authorization not found } }
+    AuthorizationPending:
+      description: The Team Lead has not finished the grant in Jira yet
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_AUTHORIZATION_PENDING, message: Grant not finished yet } }
+    ConnectionExists:
+      description: The Team already has a Connection; a Team can have only one Jira Site (AC-04)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_CONNECTION_EXISTS, message: The Team already has a Jira Site, details: { connection_id: 0193a1b2-0000-7000-8000-000000000201 } } }
+    NoProjectPicked:
+      description: At least one Jira Project must be picked (AC-02)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_NO_PROJECT_PICKED, message: Pick at least one Jira Project } }
+    DifferentJiraSite:
+      description: Re-authorisation must keep the same Jira Site
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_DIFFERENT_JIRA_SITE, message: Re-authorise the same Jira Site } }
+    ProjectAlreadyAdded:
+      description: The Jira Project is already covered by the Connection
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_PROJECT_ALREADY_ADDED, message: Project already added } }
+    LastProject:
+      description: A Connection must cover at least one Jira Project (AC-06)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_LAST_PROJECT, message: A Connection must cover at least one project } }
+    MemberOrJiraUserNotFound:
+      description: Jira User or Member unknown, or in another Team or Company (same answer, AC-20)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_MEMBER_NOT_FOUND, message: Member not found } }
+    MemberAlreadyMatched:
+      description: One Member is matched to one Jira User (AC-21)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_MEMBER_ALREADY_MATCHED, message: The Member is already matched to another Jira User } }
+    TooManyAttempts:
+      description: More than 10 connection attempts per Team Lead per hour (PRD §6.1)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTEGRATIONS_TOO_MANY_ATTEMPTS, message: Too many connection attempts, try later } }
