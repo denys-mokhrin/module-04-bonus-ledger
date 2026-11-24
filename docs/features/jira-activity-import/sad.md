@@ -249,29 +249,20 @@ ADR files live under `docs/features/jira-activity-import/adr/NNNN-<title>.md`.
 
 ## 10. Quality requirements
 
-<!-- 🎯 Навіщо: ДЕРЕВО ЯКОСТЕЙ (Quality Tree) — беремо мету з §1 і розкладаємо на          -->
-<!--           конкретні листя: тести, метрики, конфіги, drill-и. ⭐ Без §10 §1 — це       -->
-<!--           маніфест. З §10 кожна декларація мапиться на щось, ЩО МОЖНА ДОВЕСТИ.        -->
-<!-- 📋 Що писати: на кожну якість з §1 — When / Then / How verify. Числа з PRD §6 NFR     -->
-<!--           ДОСЛІВНО (не округлюй p95 ≤250мс до ≤300мс — це F6-помилка критика).        -->
-<!-- 📌 Приклад: «p95 ≤500 мс на UPDATE блоку, перевіримо k6 load test 100 req/s».        -->
+**QG-1. Correctness of activity (idempotency)**
+- **When:** the same Bonus Period window is imported again with nothing changed in Jira, or an issue moves to another project of the same Team.
+- **Then:** 0 duplicated Imported Issues, Worklogs or reported changes across repeated imports of the same window; the moved issue stays one Imported Issue.
+- **How verify:** automated re-run test in CI on recorded fixtures (`test/fixtures/jira/`), including a moved-issue fixture.
 
-Each top-3 goal from §1 expanded into a full scenario:
+**QG-2. Freshness and timeliness**
+- **When:** daily Sync Runs and the Final Pass run for healthy Connections.
+- **Then:** last successful Sync Run ≤ 26 h old for ≥ 99% of healthy Connections; Final Pass finished ≤ 12 h after month end (company timezone) for ≥ 99% of Connections; Sync Run p95 ≤ 15 min for a Connection with ≤ 5,000 issues changed in the window; ≤ 1% of Sync Runs fail because the provider limited requests.
+- **How verify:** age of the last successful Sync Run per Connection, checked hourly; Final Pass finish time vs month end, per Bonus Period; Sync Run start/finish times; Sync Run failure reasons, monthly.
 
-**QG-1. <quality attribute>**
-- **When:** <trigger condition>
-- **Then:** <expected behavior with numbers from PRD NFR>
-- **How verify:** <test / chaos drill / load test / observability>
-
-**QG-2. <quality attribute>**
-- **When:** <trigger>
-- **Then:** <expected>
-- **How verify:** <how>
-
-**QG-3. <quality attribute>**
-- **When:** <trigger>
-- **Then:** <expected>
-- **How verify:** <how>
+**QG-3. Tenant isolation and responsiveness of Import Health**
+- **When:** a Team Lead of another Team, a Member, or a user of another Company asks for a Connection, Import Health or a Jira User match; and when Import Health is opened.
+- **Then:** the answer is identical to "does not exist"; an Import Alert is visible ≤ 15 min after the Sync Run that detected the problem; Import Health view p95 ≤ 300 ms.
+- **How verify:** e2e authorization tests per role (AC-03, AC-14, AC-20); alert creation time vs Sync Run finish time; request latency for the Import Health view.
 
 ## 11. Risks and technical debt
 
