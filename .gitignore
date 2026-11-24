@@ -22,3 +22,7 @@ CLAUDE.local.md
 Thumbs.db
 .idea/
 .vscode/
+
+# SDLC plugin (per developer)
+.claude/*.local.md
+.worktrees/
