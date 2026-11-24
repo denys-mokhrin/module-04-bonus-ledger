@@ -6,7 +6,7 @@ updated_at: "2026-11-24"
 feature_size: M
 stage: "04-05"
 ticket: "<TBD>"
-target_surfaces: []
+target_surfaces: [backend-service]
 ---
 
 # Software Architecture Document — jira-activity-import
@@ -100,28 +100,16 @@ C4Context
 
 ## 4. Solution strategy
 
-<!-- 🎯 Навіщо: 3-4 СТРАТЕГІЧНІ СТОВПИ, з яких потім ростуть усі ADR. Без §4 кожен ADR    -->
-<!--           виглядає випадковим — нема зонтика. ⭐ Найгустіша секція — тут ADR-gate    -->
-<!--           спрацьовує майже завжди (рішення незворотні + мульти-модульні).            -->
-<!-- 📋 Що писати: спершу Target surface(s), потім 3-4 стратегічні вибори.                -->
-<!--           На кожен — заголовок + 2-3 речення rationale.                              -->
-<!-- 📌 ПЕРШЕ рішення §4 — Target surface(s): ЩО САМЕ будуємо. Записується у frontmatter   -->
-<!--           target_surfaces: [...] і гейтить §5 (один контейнер на поверхню) + усі       -->
-<!--           наступні стадії. Деривиться з PRD §1 «для кого» + §4 ролей. → _shared/surfaces.md -->
-<!-- 📌 Приклад: «Зберігати урок як таблицю блоків» — стовп, з якого виросло ADR-0001.    -->
+**Target surface(s) (the first decision — what's being built):** `[backend-service]`
 
-**Target surface(s) (the first decision — what's being built):** `<e.g. [backend-service, web-frontend]>`
-<!-- Mirror this list into the frontmatter `target_surfaces`. For each declared UI surface          -->
-<!-- (web-frontend / mobile-app / desktop-app) add a UI-architecture choice below (web → SSR/SPA/   -->
-<!-- hybrid; mobile → native/cross-platform). Multi-surface is usually an ADR (multi-module +       -->
-<!-- irreversible). The UI reuses the repo's existing design system / components / tokens from       -->
-<!-- architecture-map.md §Frontend — it does not design greenfield. → _shared/surfaces.md           -->
+The PRD has no screen requirement and the foundation has no frontend (`docs/architecture-map.md` §Frontend: N/A). Sync Runs are BullMQ jobs inside the same NestJS deployable, so no separate `worker` surface is declared. Single surface, reversible by adding one later → inline note, no ADR.
 
 **Top strategic choices (the seeds for ADRs):**
 
-1. **<e.g. Module isolation through events>** — <2-3 sentences rationale referencing Quality Goals and constraints>.
-2. **<e.g. Single-store persistence (Postgres)>** — <2-3 sentences>.
-3. **<e.g. UI-architecture: SPA consuming the backend API>** — <per declared UI surface; 2-3 sentences>.
+1. **Scheduled, resumable Sync Runs inside `integrations`** — one repeatable BullMQ job per Connection runs daily for the current month, a Final Pass job runs after month end and is retried on schedule until it succeeds or the Bonus Period leaves Open. No manual trigger (PRD §3), no webhooks in v1: polling keeps Jira load predictable and makes freshness ≤ 26 h measurable. → [ADR 0001](./adr/0001-run-scheduled-polling-sync-runs-as-bullmq-jobs.md)
+2. **Upsert Imported Issues by the Jira issue key** — the project rule `.claude/rules/integrations-jira.md` names the issue key as the natural key for upsert, so each Sync Run upserts snapshots by key within the period window. Simple and readable in logs and fixtures.
+3. **Changes are selected by an `updated` cursor and confirmed by a content hash** — each Sync Run asks Jira for issues updated in the period window since its checkpoint (with a boundary margin), compares a hash of the mapped snapshot, and only real changes reach the outbox with a deterministic `eventId`. This gives the idempotency NFR and resumability. → [ADR 0003](./adr/0003-select-changes-by-updated-cursor-and-content-hash.md)
+4. **Deletions and scope exits are found by reconciliation, never by "not seen in this run"** — the §2 past incident showed that sweeping unseen rows deletes good data; withdrawals (AC-27) come from the deleted-worklog feed and an id reconciliation of the period. → [ADR 0004](./adr/0004-detect-deletions-by-period-id-reconciliation.md)
 
 Each tactical decision in later sections should be traceable to one of these strategic seeds. Tactical decisions that *contradict* a strategic choice are red flags — surface them in §11 Risks.
 
