@@ -211,6 +211,284 @@ sequenceDiagram
     S->>DB: open access-lost Import Alert for the Team Lead
 ```
 
+### Connect the Team's Jira Site
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as <client>
+    participant S as <service>
+    participant X as <external-system>
+    participant D as <data-store>
+
+    Note over C,S: Precondition: Team Lead signed in, Team has no Connection (AC-01)
+    C->>S: start connection for the Team
+    S->>D: check caller is the Team Lead of this Team and Company
+    alt caller is another Team's Lead, a Member or another Company
+        S-->>C: answer as if the Connection does not exist (AC-03)
+    else Team already has a Connection
+        S-->>C: refuse, one Jira Site per Team, point to the existing Connection (AC-04)
+    else more than 10 connection attempts in the last hour
+        S-->>C: refuse, too many attempts (PRD §6.1)
+    end
+    S->>X: send Team Lead to grant read-only access
+    X-->>S: grant for one Jira Site
+    S->>X: list Jira Projects visible to the grant
+    X-->>S: projects
+    S-->>C: show site and projects to pick
+    C->>S: finish with picked Jira Projects
+    alt no Jira Project picked
+        S-->>C: refuse, at least one project must be picked (AC-02)
+    end
+    S->>D: store Connection with encrypted grant, picked projects, JiraConnected outbox event
+    Note over S,D: persists Connection, Connection Project, outbox row
+    S->>D: schedule the first Sync Run for every Open Bonus Period
+    S-->>C: connected site and projects
+    Note over C,S: Postcondition: one Connection per Team, first Sync Run scheduled
+```
+
+### Change the Team's Jira Projects
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as <client>
+    participant S as <service>
+    participant D as <data-store>
+
+    Note over C,S: Precondition: Team has a Connection and at least one Open Bonus Period
+    C->>S: add or remove a Jira Project of the connected site
+    S->>D: check caller is the Team Lead of this Team
+    alt remove the last Jira Project
+        S-->>C: refuse, a Connection must cover at least one project (AC-06)
+    else add a project
+        S->>D: add project with an empty checkpoint for every Open period
+        Note over S,D: persists Connection Project, Sync Checkpoint
+        S-->>C: project added, next Sync Run imports whole Open periods (AC-05)
+    else remove a project
+        S->>D: remove project, mark its snapshots in Open periods withdrawn, outbox withdrawal events
+        Note over S,D: persists withdrawal of Imported Issue and Worklog snapshots, outbox rows
+        S-->>C: project removed, activity no longer counts in Open periods (AC-27)
+    end
+```
+
+### Scheduled daily Sync Run
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as <message-bus>
+    participant S as <service>
+    participant D as <data-store>
+    participant X as <external-system>
+
+    Note over B,S: Precondition: Connection exists, daily schedule fires
+    B->>S: Sync Run due for Connection
+    S->>D: idempotency check, one Sync Run per Connection and day, one per Jira Site at a time
+    alt run already done or running
+        S-->>B: skip
+    end
+    S->>D: load Open periods, subscription flag, checkpoints
+    alt subscription suspended
+        S->>D: record run as paused by subscription (AC-11)
+        S-->>B: done
+    end
+    S->>X: refresh access with the stored grant
+    alt access lost
+        S->>D: record failed run, keep imported activity, open access-lost Import Alert (AC-15)
+        S-->>B: done
+    end
+    loop each Jira Project and Open period
+        S->>X: member issues updated since checkpoint, deleted Worklogs, period ids
+        Note over S,X: retry 3 times with back-off on throttling
+        X-->>S: page of issues and Worklogs
+        S->>S: map in ACL, find story points, hash snapshot
+        S->>D: upsert changed snapshots by Connection and Jira issue id, bump version, outbox events, save checkpoint
+        Note over S,D: persists Imported Issue, Worklog, Sync Checkpoint, outbox rows (AC-07, AC-08, AC-09)
+        alt story-point field not found
+            S->>D: open missing-field Import Alert for the project (AC-17)
+        end
+        S->>D: withdraw ids missing from the period membership or deleted in Jira (AC-27)
+    end
+    S->>D: open alerts for unmatched Jira Users with activity (AC-25) and projects quiet for 7 days (AC-18), close fixed ones
+    Note over S,D: persists Import Alert, Sync Run result
+    alt retries exhausted
+        S->>D: record failed run with reason, keep checkpoint for resume
+        S->>B: move job to dead-letter
+    end
+    D-->>B: relay publishes IssuesImported and WorklogsImported, consumers deduplicate by eventId (AC-10)
+    Note over B,S: Postcondition: Import Health shows this run, each change published once
+```
+
+### Final Pass with scheduled retry
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as <message-bus>
+    participant S as <service>
+    participant D as <data-store>
+    participant X as <external-system>
+
+    Note over B,S: Precondition: month ended in the company timezone, Bonus Period still Open
+    B->>S: Final Pass due for Connection and period
+    S->>D: idempotency check, period still Open and no successful Final Pass
+    alt period left Open or Final Pass already succeeded
+        S-->>B: stop, no Sync Run after a successful Final Pass (AC-26)
+    end
+    S->>X: import the whole period one last time, incl. late Worklogs
+    X-->>S: issues and Worklogs
+    S->>D: upsert changes, outbox events, mark Final Pass succeeded
+    Note over S,D: persists Imported Issue, Worklog, Sync Run (kind Final Pass), outbox rows (AC-12)
+    alt Final Pass failed
+        S->>D: record failure, keep last successful run time
+        S->>B: schedule retry while the period is Open
+        Note over S,B: retry on schedule until success or period leaves Open, then dead-letter (AC-23)
+    end
+    Note over B,S: Postcondition: period final, later changes in Jira do not reach it
+```
+
+### Re-authorise a Connection
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as <client>
+    participant S as <service>
+    participant X as <external-system>
+    participant D as <data-store>
+
+    Note over C,S: Precondition: access-lost Import Alert is open, period still Open
+    C->>S: re-authorise the existing Connection
+    S->>D: check caller is the Team Lead of this Team
+    S->>X: send Team Lead to grant read-only access
+    X-->>S: grant
+    alt grant is for a different Jira Site
+        S-->>C: refuse, the Connection keeps the same site
+    end
+    S->>D: replace encrypted grant, reset checkpoints of every Open period, keep projects and matches
+    Note over S,D: persists Connection grant, Sync Checkpoint
+    S-->>C: re-authorised
+    Note over C,S: Postcondition: next scheduled Sync Run or Final Pass retry imports the whole period and closes the alert (AC-16)
+```
+
+### Read Import Health
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as <client>
+    participant S as <service>
+    participant D as <data-store>
+
+    Note over C,S: Precondition: Team has a Connection
+    C->>S: open the Team's Import Health
+    S->>D: check caller is the Team Lead, or an HR Reviewer of the same Company
+    alt caller from another Team or Company
+        S-->>C: answer as if the Team's Import Health does not exist (AC-03)
+    end
+    S->>D: last successful Sync Run, open Import Alerts, counts per project for each Open period, Final Pass status
+    D-->>S: health summary
+    S-->>C: Import Health, read-only for an HR Reviewer (AC-13, AC-14, AC-23)
+```
+
+### Match Jira Users to Members
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as <client>
+    participant S as <service>
+    participant D as <data-store>
+    participant B as <message-bus>
+
+    Note over C,S: Precondition: an unmatched Jira User has activity in an Open period
+    C->>S: match, unmatch, or mark a Jira User as not on this Team
+    S->>D: check caller is the Team Lead of this Team
+    alt Member belongs to another Team or Company
+        S-->>C: refuse, as if the Member did not exist (AC-20)
+    else Member already matched to another Jira User
+        S-->>C: refuse, one Member is matched to one Jira User (AC-21)
+    end
+    S->>D: store match change with who and when, close unmatched-user Import Alert, JiraUserMatched outbox event
+    Note over S,D: persists Jira User Match (audit), Import Alert, outbox row (AC-19, AC-28, AC-29)
+    D-->>B: relay publishes JiraUserMatched
+    B->>B: scoring re-attributes activity of Open periods only, never by guess (AC-24)
+    S-->>C: match saved
+    Note over C,S: Postcondition: In Review and Closed periods unchanged
+```
+
+### Follow Bonus Period state
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as <message-bus>
+    participant S as <service>
+    participant D as <data-store>
+
+    Note over B,S: Precondition: Bonus Review changes a period's state
+    B->>S: BonusPeriodOpened, BonusPeriodReviewStarted or BonusPeriodClosed
+    S->>D: idempotency check by eventId
+    alt already processed
+        S-->>B: ack, no change
+    end
+    S->>D: update the Team's period read model
+    Note over S,D: persists Bonus Period State (read model), Processed Event
+    alt period left Open
+        S->>D: cancel pending Sync Runs and Final Pass retries for that period (AC-22, AC-26)
+    end
+    Note over S,B: retry 5 times with back-off, then dead-letter
+    S-->>B: ack
+```
+
+### Coverage: US/AC → flows
+
+| ID | Realized by (§6 heading) | How | Note |
+|---|---|---|---|
+| US-01 | Connect the Team's Jira Site | flow | |
+| US-02 | Change the Team's Jira Projects | flow | |
+| US-03 | Scheduled daily Sync Run, Final Pass with scheduled retry | flow | |
+| US-04 | Read Import Health | flow | |
+| US-05 | Scheduled daily Sync Run, Re-authorise a Connection | flow | |
+| US-06 | Match Jira Users to Members | flow | |
+| US-07 | Final Pass with scheduled retry, Follow Bonus Period state | flow | |
+| US-08 | Match Jira Users to Members | flow | |
+| AC-01 | Connect the Team's Jira Site | flow | |
+| AC-02 | Connect the Team's Jira Site | branch | `alt no Jira Project picked` |
+| AC-03 | Connect the Team's Jira Site | branch | `alt caller is another Team's Lead, a Member or another Company` |
+| AC-04 | Connect the Team's Jira Site | branch | `else Team already has a Connection` |
+| AC-05 | Change the Team's Jira Projects | branch | `else add a project` |
+| AC-06 | Change the Team's Jira Projects | branch | `alt remove the last Jira Project` |
+| AC-07 | Scheduled daily Sync Run | flow | |
+| AC-08 | Scheduled daily Sync Run | flow | upsert by Connection and Jira issue id + version |
+| AC-09 | Scheduled daily Sync Run | flow | identity by Jira issue id (ADR 0002) |
+| AC-10 | Scheduled daily Sync Run | flow | relay + consumer dedup by eventId |
+| AC-11 | Scheduled daily Sync Run | branch | `alt subscription suspended` |
+| AC-12 | Final Pass with scheduled retry | flow | |
+| AC-13 | Read Import Health | flow | |
+| AC-14 | Read Import Health | flow | read-only for an HR Reviewer |
+| AC-15 | Scheduled daily Sync Run | branch | `alt access lost` |
+| AC-16 | Re-authorise a Connection | flow | |
+| AC-17 | Scheduled daily Sync Run | branch | `alt story-point field not found` |
+| AC-18 | Scheduled daily Sync Run | flow | quiet-project alert step |
+| AC-19 | Match Jira Users to Members | flow | |
+| AC-20 | Match Jira Users to Members | branch | `alt Member belongs to another Team or Company` |
+| AC-21 | Match Jira Users to Members | branch | `else Member already matched to another Jira User` |
+| AC-22 | Follow Bonus Period state | branch | `alt period left Open` |
+| AC-23 | Final Pass with scheduled retry, Read Import Health | branch | `alt Final Pass failed` |
+| AC-24 | Match Jira Users to Members | flow | attribution never by guess |
+| AC-25 | Scheduled daily Sync Run | flow | unmatched-user alert step |
+| AC-26 | Final Pass with scheduled retry, Follow Bonus Period state | branch | `alt period left Open or Final Pass already succeeded` |
+| AC-27 | Change the Team's Jira Projects, Scheduled daily Sync Run | branch | `else remove a project`; withdraw step |
+| AC-28 | Match Jira Users to Members | flow | mark as not on this Team |
+| AC-29 | Match Jira Users to Members | flow | unmatch and re-match |
+
+Coverage: 8/8 user stories · 29/29 ACs — 0 non-runtime N/A.
+
+**Flags:** `<message-bus>` stands for the §5 queue and the outbox relay, both declared · persist notes name new entities for generate-data-model: Connection Project, Sync Checkpoint, Jira User Match, Import Alert, Bonus Period State (read model), Processed Event · the re-attribution step in "Match Jira Users to Members" is Contribution Scoring work (SAD §11).
+
+
 ## 7. Deployment view
 
 <!-- N/A: the feature reuses the single modular-monolith deployable, Postgres and Redis from the foundation; it adds no deployment unit. Its metrics and alerts are listed in §8 Observability. -->
