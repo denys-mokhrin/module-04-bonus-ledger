@@ -173,35 +173,43 @@ C4Container
 
 ## 6. Runtime view
 
-<!-- 🎯 Навіщо: ПОТІК У RUNTIME для 1-2 критичних сценаріїв. Хто з ким коли і у якому     -->
-<!--           порядку говорить. Без §6 §5 — лише купа коробок без життя.                  -->
-<!-- 📋 Що писати: Mermaid sequenceDiagram. Учасники — імена з §5 (не вигадуй нові!).      -->
-<!--           Повідомлення семантичні («складає чорновик»), БЕЗ HTTP-методів/шляхів —     -->
-<!--           ендпоінт-рівневі sequence-діаграми зʼявляться у stage 06 (api-forge).        -->
-<!-- ⏳ RESERVED FOR SEQUENCES: architecture-design сіє лише primary flow(s) тут.          -->
-<!--           complete-sequence-diagrams (stage 06) ДОПОВНЮЄ §6 кожним критичним flow /    -->
-<!--           кожним §5 AC — без обмеження. Не намагайся покрити все тут.                  -->
-<!-- 📌 Приклад: «methodist → web-app: складає чорновик → web-app → content-api: зберегти». -->
+Participants are the §5 containers. Messages are semantic; endpoint-level detail is api-forge's job.
 
-**Critical flow 1: <flow name>**
+**Critical flow 1: daily Sync Run for an Open Bonus Period (US-03, AC-07, AC-08, AC-10)**
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant API
-    participant Service
-    participant DB
-    User->>API: <request>
-    API->>Service: <call>
-    Service->>DB: <write tx>
-    DB-->>Service: ok
-    Service-->>API: result
-    API-->>User: 201
+    participant Q as Redis + BullMQ
+    participant S as Sync Run jobs
+    participant DB as PostgreSQL (integrations)
+    participant J as Jira Cloud
+    participant C as contribution
+    Q->>S: daily Sync Run due for Connection
+    S->>DB: load Connection, checkpoint, Open periods, subscription flag
+    alt subscription suspended or no Open period
+        S->>DB: record skipped run with reason
+    else import
+        S->>J: issues updated in period window since checkpoint
+        J-->>S: page of issues and Worklogs
+        S->>S: map in ACL, hash snapshot
+        S->>DB: upsert changed snapshots + outbox events, save checkpoint (one tx per page)
+        S->>DB: mark run succeeded, update Import Health, raise or close Import Alerts
+    end
+    DB-->>C: relay publishes IssuesImported / WorklogsImported (dedup by eventId)
 ```
 
-<!-- For XS/S: 1 flow above is enough. For M+: add 2-4 more (e.g. failure-mode flow, async flow). -->
+**Critical flow 2: access lost during a Sync Run (AC-15)**
 
-**Critical flow 2: <e.g. async event propagation>** — <if applicable, otherwise N/A>.
+```mermaid
+sequenceDiagram
+    participant S as Sync Run jobs
+    participant J as Jira Cloud
+    participant DB as PostgreSQL (integrations)
+    S->>J: refresh access with stored grant
+    J-->>S: grant revoked
+    S->>DB: mark run failed (access lost), keep imported activity
+    S->>DB: open access-lost Import Alert for the Team Lead
+```
 
 ## 7. Deployment view
 
