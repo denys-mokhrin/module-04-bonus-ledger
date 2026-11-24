@@ -1,0 +1,322 @@
+{
+  "slug": "jira-activity-import",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Add JiraUserMatched, BonusPeriodReviewStarted and SubscriptionActivated→integrations to the bc-map and public event types",
+      "layer": "docs",
+      "deps": [],
+      "acs": [
+        "AC-11",
+        "AC-19",
+        "AC-26"
+      ],
+      "dod": "bc-map lists the three event edges and the integrations/bonus-review public/ types compile; boundaries lint passes",
+      "files_hint": [
+        "docs/bc-map.md",
+        "src/modules/integrations/public/",
+        "src/modules/bonus-review/public/"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Promote staged migrations for connections, projects, period states and checkpoints",
+      "layer": "migration",
+      "deps": [],
+      "acs": [
+        "AC-01",
+        "AC-04",
+        "AC-05",
+        "AC-06"
+      ],
+      "dod": "the four staged pairs are promoted to Prisma migrations, apply and revert cleanly on a fresh integrations schema",
+      "files_hint": [
+        "docs/features/jira-activity-import/migrations/20261124120000_*",
+        "docs/features/jira-activity-import/migrations/20261124120100_*",
+        "docs/features/jira-activity-import/migrations/20261124120200_*",
+        "docs/features/jira-activity-import/migrations/20261124120300_*",
+        "src/modules/integrations/db/"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Promote staged migrations for sync runs, imported issues, worklogs, Jira users, alerts and processed events",
+      "layer": "migration",
+      "deps": [
+        "T2"
+      ],
+      "acs": [
+        "AC-07",
+        "AC-08",
+        "AC-09",
+        "AC-13",
+        "AC-19",
+        "AC-25"
+      ],
+      "dod": "the seven remaining staged pairs apply and revert cleanly after T2",
+      "files_hint": [
+        "docs/features/jira-activity-import/migrations/20261124120400_*",
+        "docs/features/jira-activity-import/migrations/2026112412050*",
+        "docs/features/jira-activity-import/migrations/2026112412060*",
+        "docs/features/jira-activity-import/migrations/2026112412070*",
+        "docs/features/jira-activity-import/migrations/2026112412080*",
+        "docs/features/jira-activity-import/migrations/2026112412090*",
+        "docs/features/jira-activity-import/migrations/20261124121000_*",
+        "src/modules/integrations/db/"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Build the Jira ACL: OAuth 3LO client, REST client with retry-hint back-off, issue/Worklog mapper",
+      "layer": "infra",
+      "deps": [],
+      "acs": [
+        "AC-09",
+        "AC-15",
+        "AC-17"
+      ],
+      "dod": "unit tests on recorded fixtures map issues by Jira issue id, find the story-point field or report it missing, detect a revoked grant, back off on throttling; no token in logs",
+      "files_hint": [
+        "src/modules/integrations/jira/",
+        "test/fixtures/jira/"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Implement Connection and Jira Project use cases with authorization and domain errors",
+      "layer": "app",
+      "deps": [
+        "T2",
+        "T4"
+      ],
+      "acs": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-05",
+        "AC-06",
+        "AC-16"
+      ],
+      "dod": "unit tests: one Connection per Team, at least one project, same-site re-authorisation resets checkpoints, other Team/Company answers like not found",
+      "files_hint": [
+        "src/modules/integrations/connections/"
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Expose Connection, authorization, re-authorisation and project endpoints",
+      "layer": "ports",
+      "deps": [
+        "T5"
+      ],
+      "acs": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-06",
+        "AC-16"
+      ],
+      "dod": "e2e tests return the openapi.yaml responses incl. 409 for an existing Connection and the last project, 404 for another Team, 429 after 10 attempts per hour",
+      "files_hint": [
+        "src/modules/integrations/connections/connections.controller.ts",
+        "test/integrations/connections.e2e-spec.ts"
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Follow Bonus Period and subscription state from events",
+      "layer": "app",
+      "deps": [
+        "T1",
+        "T2"
+      ],
+      "acs": [
+        "AC-11",
+        "AC-22",
+        "AC-26"
+      ],
+      "dod": "listener tests: duplicate eventId ignored, period leaving Open cancels pending runs, suspension pauses runs",
+      "files_hint": [
+        "src/modules/integrations/sync/period-state.listener.ts",
+        "src/modules/integrations/sync/period-state.repo.ts"
+      ]
+    },
+    {
+      "id": "T8",
+      "title": "Implement the daily Sync Run: cursor, content hash, versioned upsert, outbox events",
+      "layer": "app",
+      "deps": [
+        "T3",
+        "T4",
+        "T7"
+      ],
+      "acs": [
+        "AC-07",
+        "AC-08",
+        "AC-09",
+        "AC-10",
+        "AC-15"
+      ],
+      "dod": "integration test on fixtures: a re-run of the same window publishes nothing new, a moved issue stays one Imported Issue, a crashed run resumes from its checkpoint, access loss keeps data",
+      "files_hint": [
+        "src/modules/integrations/sync/sync-run.service.ts",
+        "src/modules/integrations/sync/sync-run.repo.ts",
+        "test/integrations/sync-run.int-spec.ts"
+      ]
+    },
+    {
+      "id": "T9",
+      "title": "Detect deletions and scope exits by period reconciliation and publish withdrawals",
+      "layer": "app",
+      "deps": [
+        "T8"
+      ],
+      "acs": [
+        "AC-27"
+      ],
+      "dod": "integration test: deleted Worklog, issue moved to a foreign project and removed project are withdrawn in Open periods only; Closed periods unchanged",
+      "files_hint": [
+        "src/modules/integrations/sync/reconciliation.service.ts",
+        "test/integrations/reconciliation.int-spec.ts"
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "Schedule the Final Pass with retries while the period is Open",
+      "layer": "app",
+      "deps": [
+        "T8"
+      ],
+      "acs": [
+        "AC-12",
+        "AC-23",
+        "AC-26"
+      ],
+      "dod": "integration test: Final Pass imports late Worklogs, a failure is retried until success or period leaves Open, no run after success",
+      "files_hint": [
+        "src/modules/integrations/sync/final-pass.service.ts",
+        "test/integrations/final-pass.int-spec.ts"
+      ]
+    },
+    {
+      "id": "T11",
+      "title": "Raise and close Import Alerts for access, missing field, unmatched users and quiet projects",
+      "layer": "app",
+      "deps": [
+        "T8"
+      ],
+      "acs": [
+        "AC-15",
+        "AC-17",
+        "AC-18",
+        "AC-25"
+      ],
+      "dod": "unit tests: each alert kind opens once (partial unique), closes when fixed; quiet-project uses a rolling 7-day window",
+      "files_hint": [
+        "src/modules/integrations/health/import-alerts.service.ts"
+      ]
+    },
+    {
+      "id": "T12",
+      "title": "Expose Import Health for the Team Lead and HR Reviewers",
+      "layer": "ports",
+      "deps": [
+        "T10",
+        "T11"
+      ],
+      "acs": [
+        "AC-13",
+        "AC-14",
+        "AC-23"
+      ],
+      "dod": "e2e test: counts per project for each Open period, open alerts, Final Pass status; HR Reviewer read-only; another Company gets not found; p95 ≤ 300 ms on seeded data",
+      "files_hint": [
+        "src/modules/integrations/health/",
+        "test/integrations/import-health.e2e-spec.ts"
+      ]
+    },
+    {
+      "id": "T13",
+      "title": "Implement Jira User match, unmatch and not-on-this-Team with audit and events",
+      "layer": "app",
+      "deps": [
+        "T3",
+        "T1"
+      ],
+      "acs": [
+        "AC-19",
+        "AC-20",
+        "AC-21",
+        "AC-24",
+        "AC-28",
+        "AC-29"
+      ],
+      "dod": "unit + integration tests: one Member per Jira User, cross-Team Member answers not found, every change is audited and emits JiraUserMatched, alert closes",
+      "files_hint": [
+        "src/modules/integrations/matching/"
+      ]
+    },
+    {
+      "id": "T14",
+      "title": "Expose Jira User list and matching endpoints",
+      "layer": "ports",
+      "deps": [
+        "T13"
+      ],
+      "acs": [
+        "AC-19",
+        "AC-20",
+        "AC-21",
+        "AC-28",
+        "AC-29"
+      ],
+      "dod": "e2e tests return the openapi.yaml responses incl. 409 for a Member already matched and cursor pagination",
+      "files_hint": [
+        "src/modules/integrations/matching/matching.controller.ts",
+        "test/integrations/matching.e2e-spec.ts"
+      ]
+    },
+    {
+      "id": "T15",
+      "title": "Wire the integrations module, BullMQ schedules and metrics",
+      "layer": "wiring",
+      "deps": [
+        "T6",
+        "T9",
+        "T10",
+        "T12",
+        "T14"
+      ],
+      "acs": [
+        "AC-07",
+        "AC-12"
+      ],
+      "dod": "app boots with the module; daily and Final Pass schedules registered; freshness metric and >26 h alert exposed",
+      "files_hint": [
+        "src/modules/integrations/integrations.module.ts",
+        "src/app.module.ts"
+      ]
+    },
+    {
+      "id": "T16",
+      "title": "Consume activity, withdrawals and JiraUserMatched in contribution (separate context work)",
+      "layer": "app",
+      "deps": [
+        "T1",
+        "T8",
+        "T13"
+      ],
+      "acs": [
+        "AC-10",
+        "AC-24",
+        "AC-27"
+      ],
+      "dod": "contribution listener tests: duplicate eventId ignored, re-attribution touches Open periods only, withdrawals stop counting",
+      "files_hint": [
+        "src/modules/contribution/app/"
+      ]
+    }
+  ]
+}
