@@ -39,29 +39,27 @@ target_surfaces: []
 
 ## 2. Constraints
 
-<!-- 🎯 Навіщо: §4 (стратегія) працює тільки коли §2 зафіксувала, ЩО ВЖЕ ЗАФІКСОВАНО:    -->
-<!--           стек, версії, дедлайн, регуляторні вимоги. Це вхід, не вихід.             -->
-<!-- 📋 Що писати: чотири блоки — Технічні / Організаційні / Конвенції / Регуляторні.     -->
-<!-- 📌 Приклад: «Postgres 18» (не «Postgres»); «дедлайн Q3 — жорсткий» (не «бажано»).    -->
-
 **Technical.**
-- <Language + version, e.g. Go 1.26>
-- <Framework + version, e.g. chi v5.1, pgx v5.7>
-- <Datastore + version, e.g. Postgres 18>
-- <Architecture convention, e.g. hexagonal per CLAUDE.md>
+- TypeScript (strict) on Node.js 22; NestJS 11 modular monolith, one deployable (`docs/architecture-map.md` §Stack, `docs/adr/0001-initial-setup.md`).
+- PostgreSQL 16 via Prisma, one Postgres schema and one Prisma client per context; this feature writes only to the `integrations` schema (`docs/adr/0002-persistence-per-context-prisma.md`).
+- BullMQ on Redis 7 for scheduled jobs; Redis is a queue, never a system of record.
+- Contexts are fixed by `docs/bc-map.md`; cross-context communication is events through each publisher's transactional outbox (at-least-once, consumers deduplicate by `eventId`); synchronous calls only through `public/` facades.
+- Jira Cloud only, one Jira Site per Team (PRD §3).
+- **Known constraint — the issue key is not stable:** Jira changes the issue key when an issue moves between projects (`.notes/decisions.md` §4), while `.claude/rules/integrations-jira.md` still says "natural key for upsert: Jira issue key". The two sources conflict and AC-09 requires a moved issue to stay one Imported Issue.
+- **Past incident (design review) — "mark and sweep" deletes good data:** an earlier proposal swept rows not seen in a run as deleted; it was found wrong because an issue updated later falls outside the previous month's window and would be deleted by mistake (`.notes/decisions.md` §5).
 
 **Organisational.**
-- <Effort budget, e.g. 3 person-weeks>
-- <Deadline, e.g. 2026-Q3 hard>
-- <Team composition, e.g. 1 backend + 0.5 frontend>
+- Feature size M; one backend developer; no external deadline (PRD §1). The event-delivery groundwork (scaffold S9: outbox + relay + deduplicating listener) is a prerequisite, not part of this feature (PRD §3).
 
 **Conventions.**
-- <Link to CLAUDE.md or project conventions>
-- <Naming, ID strategy, error-handling pattern>
+- `CLAUDE.md` §Conventions and `docs/architecture-map.md` §Conventions: `DomainError` with a stable `code` mapped by one global filter; UUIDv7 from `src/shared/ids/`; injected `Clock`; dates in UTC, a Bonus Period is a calendar month in the company's timezone; Conventional Commits scoped by context.
+- `customfield_*` ids are mapped to product terms only inside `src/modules/integrations/jira/` (the anti-corruption layer).
+- On provider throttling, back off using the provider's retry hint (`.claude/rules/integrations-jira.md`).
 
 **Regulatory / external.**
-- <e.g. GDPR — user deletion behavior per ADR-NNNN>
-- <e.g. SOC2, PCI — applicable controls>
+- Personal data (Worklogs, Jira identities, optional email) is confidential; employee data is deleted 90 days after a company cancels (`SPEC.md`); raw Jira comments are never imported.
+- Jira tokens are encrypted at rest and decrypted only in the HTTP client; tokens, headers and full provider payloads are never logged (`.claude/rules/integrations.md`).
+- Atlassian rate limits apply per Jira Site; PRD §6 allows ≤ 1% of Sync Runs failing because of throttling.
 
 ## 3. Context and scope
 
