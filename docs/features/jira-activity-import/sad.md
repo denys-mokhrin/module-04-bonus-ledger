@@ -12,7 +12,7 @@ target_surfaces: [backend-service]
 # Software Architecture Document — jira-activity-import
 
 <!-- Stages 04-05 → see sdlc/plugin/skills/architecture-design/SKILL.md -->
-<!-- 12 Arc42 sections. Empty sections — <!-- N/A: <one-line reason> -->. -->
+<!-- 12 Arc42 sections. Empty sections are marked N/A with a one-line reason. -->
 <!-- C4 Context (L1) lives inline in §3. C4 Container (L2) lives inline in §5. -->
 
 ## 1. Introduction and goals
