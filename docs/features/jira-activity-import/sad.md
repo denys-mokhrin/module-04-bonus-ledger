@@ -235,17 +235,17 @@ N/A — the feature reuses the existing single deployable, PostgreSQL 16 and Red
 
 ## 9. Architecture decisions
 
-<!-- 🎯 Навіщо: ЗВОРОТНИЙ ІНДЕКС на папку adr/. `ls adr/` дає файли, §9 дає семантику —    -->
-<!--           чому вони існують, до якого зрізу SAD привʼязані, у якому статусі.           -->
-<!-- 📋 Що писати: таблиця з 4 колонками. Один рядок на ADR. Mixed status — це OK.         -->
-<!-- 📌 Приклад: «0001 | Зберігати урок як таблицю блоків | Accepted | §4».                -->
-
 | # | Title | Status | Section |
 |---|---|---|---|
-| <NNNN> | <imperative — e.g. "Use sliding window for rate limiting"> | Accepted | §<N> |
-| <NNNN> | <imperative — e.g. "Co-locate outbox worker in API process"> | Accepted | §<N> |
+| 0001 | Run scheduled polling Sync Runs as BullMQ jobs | Accepted | §4 |
+| 0002 | Identify Imported Issues by Jira issue id | Accepted | §4 |
+| 0003 | Select changes by updated cursor and content hash | Accepted | §4 |
+| 0004 | Detect deletions by period id reconciliation | Accepted | §4 |
+| 0005 | Publish Jira User matches as events for immediate attribution | Accepted | §5 |
+| 0006 | Follow Bonus Period state through Bonus Review events | Accepted | §5 |
+| 0007 | Authorise Jira with OAuth 3LO and an encrypted refresh token | Accepted | §8 |
 
-ADR files live under `docs/features/<slug>/adr/NNNN-<title>.md`.
+ADR files live under `docs/features/jira-activity-import/adr/NNNN-<title>.md`.
 
 ## 10. Quality requirements
 
