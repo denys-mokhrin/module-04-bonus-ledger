@@ -281,14 +281,12 @@ ADR files live under `docs/features/jira-activity-import/adr/NNNN-<title>.md`.
 
 ## 12. Glossary
 
-<!-- 🎯 Навіщо: ⭐ СЛОВНИК ДОМЕНУ, який припиняє суперечки через рік («checkpoint —      -->
-<!--           weekly чи biweekly? Quarter — календарний чи фіскальний?»).                -->
-<!-- 📋 Що писати: таблиця термін / значення. Бізнес-терміни + технічні вперемішку.       -->
-<!--           Один термін може мати дві мови у заголовку: «Goal (Обʼєктив)».              -->
-<!-- 📌 Приклад: «Lesson | урок усередині курсу, що складається з блоків (text, video)». -->
+The canonical glossary is [CONTEXT.md](./CONTEXT.md); this table adds only technical terms used in this SAD.
 
 | Term | Meaning |
 |---|---|
-| <e.g. Goal> | <quarterly intent in statement form> |
-| <e.g. KR> | <Key Result — measurable target linked to a Goal> |
-| <e.g. Checkpoint> | <bi-weekly progress update on a KR> |
+| Checkpoint | The `updated` cursor position a Sync Run saved after its last committed page; a resumed run continues from it |
+| Content hash | A hash of the mapped Imported Issue or Worklog; equal hashes mean "nothing changed", so nothing is published |
+| Reconciliation | Comparing the Jira ids that exist for a period with the ids imported, to find deletions and scope exits |
+| Outbox | The `integrations` table written in the same transaction as the state change; a relay publishes its rows as events |
+| ACL (anti-corruption layer) | The `jira/` mapper that turns Jira payloads into domain terms; the only place `customfield_*` ids appear |
