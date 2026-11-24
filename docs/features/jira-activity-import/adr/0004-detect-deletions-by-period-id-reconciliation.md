@@ -26,13 +26,13 @@ AC-27 requires activity that is deleted in Jira, moved out of the Team's project
 
 ## Considered options
 
-1. **Deleted-worklog feed + id reconciliation of each Open period** — ask Jira which Worklogs were deleted since the checkpoint and compare the set of issue ids Jira returns for the period with the imported set.
-2. **Mark and sweep by last seen run** — mark rows seen in a run and treat unseen rows as deleted.
-3. **Ignore deletions** — keep everything once imported.
+1. **Deleted-worklog feed + id reconciliation of each Open period** — ask Jira which Worklogs were deleted since the checkpoint and compare the issue ids returned by the period's membership query (ADR 0003) with the imported set.
+2. **Delete and re-insert the period each run** — drop the period's snapshots and write what Jira returns now, which removes deleted items by itself.
+3. **Jira deletion webhooks** — subscribe to issue and Worklog deletion events and withdraw on delivery.
 
 ## Decision outcome
 
-**Chosen:** Option 1. It is the only option that withdraws real deletions without deleting good data; mark and sweep is the incident from §2, and ignoring deletions contradicts AC-27 and gives wrong scores.
+**Chosen:** Option 1. It is the only option that withdraws real deletions without deleting good data; delete-and-insert loses the stable identity of ADR 0002 and republishes everything; webhooks need a public inbound endpoint and still miss events during downtime, so reconciliation would be needed anyway. The §2 mark-and-sweep incident was not reconsidered.
 
 ## Consequences
 

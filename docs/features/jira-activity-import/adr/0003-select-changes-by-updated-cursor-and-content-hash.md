@@ -26,7 +26,7 @@ Each Sync Run must refresh the period without duplicating anything and must resu
 
 ## Considered options
 
-1. **`updated` cursor with a boundary margin + content hash + deterministic `eventId`** — fetch issues updated since the checkpoint, skip unchanged snapshots by hash, publish changes with an id derived from (entity id, hash).
+1. **`updated` cursor with a boundary margin + content hash + deterministic `eventId`** — fetch member issues of the period (Worklog dated in the period or resolved in it) updated since the checkpoint of (Connection, Jira Project, Bonus Period), skip unchanged snapshots by hash, bump a version on every real change and publish it with `eventId` = hash(Connection id, entity id, version). An empty checkpoint (new project, re-authorised Connection) imports the whole period.
 2. **Full re-import of the period every run** — fetch every issue of the period each time and publish all of them.
 3. **Delete and insert the period each run** — drop the period's snapshots and write them again.
 
@@ -46,6 +46,7 @@ Each Sync Run must refresh the period without duplicating anything and must resu
 
 **Neutral**
 - Issues moved into the Team's project are caught because the move updates `updated`
+- Period membership is defined by Worklog date and resolution date, never by `updated` (`.notes/decisions.md`)
 
 ## Links
 

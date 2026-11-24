@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Accepted
 owner: "Denys Mokhrin"
 reviewers: ["Tech Lead", "Security Lead"]
 updated_at: "2026-11-24"
@@ -108,8 +108,8 @@ The PRD has no screen requirement and the foundation has no frontend (`docs/arch
 
 1. **Scheduled, resumable Sync Runs inside `integrations`** — one repeatable BullMQ job per Connection runs daily for the current month, a Final Pass job runs after month end and is retried on schedule until it succeeds or the Bonus Period leaves Open. No manual trigger (PRD §3), no webhooks in v1: polling keeps Jira load predictable and makes freshness ≤ 26 h measurable. → [ADR 0001](./adr/0001-run-scheduled-polling-sync-runs-as-bullmq-jobs.md)
 2. **Identify an Imported Issue by the Jira issue id, never by the issue key** — the §2 constraint shows the issue key changes when an issue moves between projects, and the project rule that still names the key would turn every move into a duplicate and break AC-09 and the 0-duplicates NFR. The issue id is the upsert key; the key is stored as a mutable attribute. → [ADR 0002](./adr/0002-identify-imported-issues-by-jira-issue-id.md)
-3. **Changes are selected by an `updated` cursor and confirmed by a content hash** — each Sync Run asks Jira for issues updated in the period window since its checkpoint (with a boundary margin), compares a hash of the mapped snapshot, and only real changes reach the outbox with a deterministic `eventId`. This gives the idempotency NFR and resumability. → [ADR 0003](./adr/0003-select-changes-by-updated-cursor-and-content-hash.md)
-4. **Deletions and scope exits are found by reconciliation, never by "not seen in this run"** — the §2 past incident showed that sweeping unseen rows deletes good data; withdrawals (AC-27) come from the deleted-worklog feed and an id reconciliation of the period. → [ADR 0004](./adr/0004-detect-deletions-by-period-id-reconciliation.md)
+3. **Changes are selected by an `updated` cursor over the period's membership and confirmed by a content hash** — an issue belongs to a Bonus Period when it has a Worklog dated in the period or was resolved in the period (company timezone), never by its `updated` time; each Sync Run asks Jira for member issues updated since the checkpoint of (Connection, Jira Project, Bonus Period) with a boundary margin, compares a hash of the mapped snapshot, and only real changes reach the outbox with a deterministic `eventId`. A checkpoint is empty for a newly added Jira Project and is reset for every Open period when a Connection is re-authorised, so those runs import the whole period (AC-05, AC-16). This gives the idempotency NFR and resumability. → [ADR 0003](./adr/0003-select-changes-by-updated-cursor-and-content-hash.md)
+4. **Deletions and scope exits are found by reconciliation, never by "not seen in this run"** — the §2 past incident showed that sweeping unseen rows deletes good data; withdrawals (AC-27) come from the deleted-worklog feed and a reconciliation against the period's membership query (not an `updated` window). → [ADR 0004](./adr/0004-detect-deletions-by-period-id-reconciliation.md)
 
 Each tactical decision in later sections should be traceable to one of these strategic seeds. Tactical decisions that *contradict* a strategic choice are red flags — surface them in §11 Risks.
 
@@ -189,7 +189,7 @@ sequenceDiagram
     alt subscription suspended or no Open period
         S->>DB: record skipped run with reason
     else import
-        S->>J: issues updated in period window since checkpoint
+        S->>J: member issues of the period updated since checkpoint (empty checkpoint = whole period)
         J-->>S: page of issues and Worklogs
         S->>S: map in ACL, hash snapshot
         S->>DB: upsert changed snapshots + outbox events, save checkpoint (one tx per page)
@@ -222,14 +222,14 @@ N/A — the feature reuses the existing single deployable, PostgreSQL 16 and Red
 | Concept | Convention | Where defined |
 |---|---|---|
 | Logging | Structured logs with `context=integrations`, `connectionId`, `syncRunId`; never tokens, headers or provider payloads | `.claude/rules/integrations.md` |
-| Authentication to Jira | Atlassian OAuth 2.0 (3LO) with read-only scopes; refresh token encrypted at rest and decrypted only in the Jira client; any Team Lead of the Team can re-authorise the same Jira Site | [ADR 0007](./adr/0007-authorise-jira-with-oauth-3lo-and-encrypted-refresh-token.md) |
+| Authentication to Jira | Atlassian OAuth 2.0 (3LO) with read-only scopes; refresh token encrypted at rest and decrypted only in the Jira client; the Team Lead of the Team (including a new Team Lead after the previous one left) re-authorises the same Jira Site | [ADR 0007](./adr/0007-authorise-jira-with-oauth-3lo-and-encrypted-refresh-token.md) |
 | Authorization | Role checked per request through Identity's `TeamDirectory` facade; another Team's or Company's Connection, Member or Import Health answers exactly like "does not exist" | PRD §6.1, reference `identity` module |
 | Error handling | `DomainError` subclasses with stable codes (e.g. connection already exists, last project, Member already matched); one global filter maps them | `docs/architecture-map.md` §Conventions |
 | ID strategy | UUIDv7 from `src/shared/ids/` for own rows; Jira issue id and Jira account id stored as provider ids | [ADR 0002](./adr/0002-identify-imported-issues-by-jira-issue-id.md) |
 | Period attribution | Worklogs belong to the Bonus Period of the day they cover; story points to the period of the issue's resolution date, in the company's timezone (PRD §8 default adopted) | here |
-| Idempotency / events | Deterministic `eventId` = hash of (issue or Worklog id, content hash); outbox in the same transaction; consumers deduplicate | [ADR 0003](./adr/0003-select-changes-by-updated-cursor-and-content-hash.md) |
+| Idempotency / events | Snapshot key = (Connection id, Jira issue or Worklog id); every real change bumps the snapshot version; deterministic `eventId` = hash of (Connection id, entity id, version), so a retried write reuses the id and an A→B→A change or a re-added project gets a new one; outbox in the same transaction; consumers deduplicate | [ADR 0003](./adr/0003-select-changes-by-updated-cursor-and-content-hash.md) |
 | Deletions / scope exits | Deleted-worklog feed + period id reconciliation; withdrawals are published, never silently dropped | [ADR 0004](./adr/0004-detect-deletions-by-period-id-reconciliation.md) |
-| Rate limiting | Back off with the provider's retry hint; a per-Jira-Site concurrency of 1 Sync Run; 10 connection attempts per Team Lead per hour | `.claude/rules/integrations-jira.md`, PRD §6.1 |
+| Rate limiting | Back off with the provider's retry hint (`.claude/rules/integrations-jira.md`); at most 1 Sync Run at a time per Jira Site (decision of this SAD); 10 connection attempts per Team Lead per hour (PRD §6.1) | rule file, here, PRD §6.1 |
 | Observability | Metrics: last successful Sync Run age per Connection, Final Pass finish vs month end, Sync Run duration, throttling failures; alert when a healthy Connection's last success is > 26 h old | PRD §6 |
 | Internationalisation | N/A, English only | — |
 
@@ -273,7 +273,9 @@ ADR files live under `docs/features/jira-activity-import/adr/NNNN-<title>.md`.
 | Atlassian rate limits on large sites could push throttling failures above 1% | Medium | Per-site concurrency 1, retry hint back-off, alert on the monthly ratio | Backend |
 | Scaffold S9 (outbox + relay) is not built; this feature cannot publish events without it | High | Treat S9 as a hard dependency in break-tasks | Tech Lead |
 | `.claude/rules/integrations-jira.md` still names the issue key as the upsert key | Low | Update the rule in the first implementation task (ADR 0002) | Backend |
-| Open architectural decision: can two Teams pick the same Jira Project, and does a shared issue count for both? | Open question | Resolve before break-tasks; current default: allowed, each Team counts only its own matched Members (PRD §8) | PM + Tech Lead |
+| `docs/bc-map.md` changes: new `JiraUserMatched` (integrations → contribution), `SubscriptionActivated` billing → integrations, contribution consuming Bonus Period events | High | Update bc-map and the publishers' `public/` types in the first task; break-tasks lists them as prerequisites | Tech Lead |
+| Contribution Scoring work outside this feature: re-attribution on `JiraUserMatched`, handling withdrawals (AC-27), tracking which periods are Open | High | Separate tasks owned by the contribution context, scheduled with this feature | Tech Lead |
+| Open architectural decision: can two Teams pick the same Jira Project, and does a shared issue count for both? | Open question | Resolve by 2026-12-01 (before break-tasks); current default: allowed — snapshots and `eventId` are scoped per Connection (§8), each Team counts only its own matched Members (PRD §8) | PM + Tech Lead |
 
 **Accepted debt (acceptable in v1, plan to fix later):**
 - Polling only, no Jira webhooks — freshness is daily, not near-real-time.

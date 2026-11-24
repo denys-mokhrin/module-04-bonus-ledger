@@ -26,7 +26,7 @@ SAD §2 records a known constraint: Jira changes the issue key when an issue mov
 
 ## Considered options
 
-1. **Jira issue id as the upsert key, issue key as a mutable attribute** — the numeric id Jira never changes identifies the snapshot; the key is updated on every run.
+1. **Jira issue id as the upsert key, issue key as a mutable attribute** — the numeric id Jira never changes, scoped by the Connection id, identifies the snapshot; the key is updated on every run.
 2. **Jira issue key as the upsert key (current project rule)** — the human-readable key identifies the snapshot, as the rule file says.
 3. **Issue key plus a move-detection step** — keep the key and merge the old and new snapshot when Jira reports a move.
 

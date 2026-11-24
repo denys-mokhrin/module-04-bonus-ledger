@@ -32,7 +32,7 @@ US-01 needs read access to the Team's Jira Cloud site that survives when the con
 
 ## Decision outcome
 
-**Chosen:** Option 1. It gives read-only scopes, revocation that the import can detect, and re-authorisation by any Team Lead of the Team without sharing a secret. Pasted API tokens carry the person's full rights and are copied by hand; a site app needs a Jira administrator, which CONTEXT says the Team Lead does not have to be.
+**Chosen:** Option 1. It gives read-only scopes, revocation that the import can detect, and re-authorisation by the Team Lead of the Team (also a new Team Lead after the previous one left) without sharing a secret. Pasted API tokens carry the person's full rights and are copied by hand; a site app needs a Jira administrator, which CONTEXT says the Team Lead does not have to be.
 
 ## Consequences
 

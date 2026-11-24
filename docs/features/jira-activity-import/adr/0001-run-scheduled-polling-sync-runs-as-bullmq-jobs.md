@@ -29,11 +29,11 @@ PRD US-03 needs the open Bonus Period refreshed daily and finalised by a Final P
 
 1. **Repeatable BullMQ job per Connection, polling Jira** — a daily job per Connection plus a Final Pass job with scheduled retries, in the same deployable.
 2. **Jira webhooks plus a nightly polling safety net** — near-real-time changes pushed by Jira, polling only to repair gaps.
-3. **Separate worker deployable for sync** — the same polling jobs, but in their own process and scaling unit.
+3. **In-process scheduler without a queue** — a timer in the NestJS app starts Sync Runs directly, without BullMQ.
 
 ## Decision outcome
 
-**Chosen:** Option 1. It meets the daily freshness target with the infrastructure that already exists, keeps Jira load predictable (no manual sync, PRD §3) and makes the Final Pass retry a plain scheduled job. Webhooks add a public inbound endpoint and missed-delivery repair for no PRD gain; a separate deployable is premature for one feature.
+**Chosen:** Option 1. It meets the daily freshness target with the infrastructure that already exists, keeps Jira load predictable (no manual sync, PRD §3) and makes the Final Pass retry a plain scheduled job. Webhooks add a public inbound endpoint and missed-delivery repair for no PRD gain; an in-process timer has no persisted retries or resumable jobs, so a crash during the Final Pass would be lost.
 
 ## Consequences
 

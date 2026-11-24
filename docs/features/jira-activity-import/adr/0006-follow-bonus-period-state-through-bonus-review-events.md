@@ -28,11 +28,11 @@ The import must stop changing a period when it leaves Open (AC-22, AC-26) and mu
 
 1. **Local read model from Bonus Review events, adding `BonusPeriodReviewStarted`** — `integrations` stores each Team's period state from three events and checks it before every write.
 2. **Query Bonus Review synchronously before each Sync Run** — add a period-state facade to bonus-review and call it.
-3. **Stop by calendar only** — treat a period as frozen at a fixed day after month end.
+3. **Freeze command from Bonus Review** — bonus-review calls an `integrations` `public/` facade to freeze a period when it moves it to In Review.
 
 ## Decision outcome
 
-**Chosen:** Option 1. It keeps contexts decoupled, works when Bonus Review is slow, and uses the event mechanism the foundation already mandates; the new event is a one-line bc-map change. A synchronous query adds a runtime dependency; a calendar rule contradicts the PRD, where the period leaves Open when Bonus Review moves it.
+**Chosen:** Option 1. It keeps contexts decoupled, works when Bonus Review is slow, and uses the event mechanism the foundation already mandates; the new event is a one-line bc-map change. A synchronous query adds a runtime dependency; a freeze command makes bonus-review depend on integrations and is lost if the call fails, unlike an outbox event.
 
 ## Consequences
 

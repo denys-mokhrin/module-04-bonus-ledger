@@ -28,11 +28,11 @@ Clarified PRD AC-19, AC-28 and AC-29 say a match, unmatch or "not on this Team" 
 
 1. **Match events from `integrations`, re-attribution in `contribution`** — write the match with a `JiraUserMatched` outbox event; Contribution Scoring re-attributes the Jira User's activity in its Open periods.
 2. **Attribute inside `integrations` and republish all activity** — on every match, re-emit every affected IssuesImported/WorklogsImported with the Member id.
-3. **Wait for the next Sync Run** — store the match and let the next run carry it.
+3. **Matching facade queried at scoring time** — `integrations` exposes a `public/` query of current matches and Contribution Scoring reads it whenever it scores.
 
 ## Decision outcome
 
-**Chosen:** Option 1. One small event per match keeps the change immediate and auditable and keeps attribution next to scoring. Republishing all activity multiplies events for one click; waiting for a Sync Run breaks AC-19 after the Final Pass.
+**Chosen:** Option 1. One small event per match keeps the change immediate and auditable and keeps attribution next to scoring. Republishing all activity multiplies events for one click; a facade query couples scoring to integrations at runtime and cannot keep In Review periods unchanged when a match changes later.
 
 ## Consequences
 
@@ -42,7 +42,7 @@ Clarified PRD AC-19, AC-28 and AC-29 say a match, unmatch or "not on this Team" 
 
 **Negative**
 - Adds the `JiraUserMatched` event to `docs/bc-map.md`
-- Contribution must know which periods are Open (it already consumes Bonus Period events)
+- Contribution must consume Bonus Period events to know which periods are Open (new work, SAD §11)
 
 **Neutral**
 - Activity events carry the Jira account id, never a guessed Member
