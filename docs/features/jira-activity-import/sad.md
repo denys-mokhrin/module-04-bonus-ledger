@@ -266,25 +266,18 @@ ADR files live under `docs/features/jira-activity-import/adr/NNNN-<title>.md`.
 
 ## 11. Risks and technical debt
 
-<!-- 🎯 Навіщо: ⭐ збирає ВСЕ, що може зламатись — і не лише технічне. Без §11 ризики   -->
-<!--           обговорюються на стендапах і губляться; борг лишається у голові того,    -->
-<!--           хто його прийняв.                                                          -->
-<!-- 📋 Що писати: таблиця ризик/борг — серйозність — мітигація — власник. Технічний    -->
-<!--           борг окремою секцією.                                                      -->
-<!-- 📌 Приклад: «EM не пушить — member не оновлює дані | High | …». Перший ризик —      -->
-<!--           часто продуктовий, не технічний. Це нормально.                            -->
-
-<!-- Severity column literals: Low / Medium / High for regular risks; "Open question" for rows
-     created by Step-7 `Save as Open Question` resolutions (see references/socratic-loop.md). -->
-
 | Risk / debt | Severity | Mitigation | Owner |
 |---|---|---|---|
-| <e.g. Outbox lag may reach hours during downstream outage> | Medium | <Alert >10 min, on-call playbook, retry backoff> | <DevOps> |
-| <e.g. No event schema versioning in v1> | Medium | <ADR-NNNN planned for v2, graceful handling of unknown fields> | <Backend> |
-| Open architectural decision: <decision-headline> | Open question | Resolve before <stage trigger or YYYY-MM-DD>; <inline rationale from Step-7 Save-as-OQ> | <owner> |
+| `BonusPeriodReviewStarted` does not exist in `docs/bc-map.md` yet; Bonus Review must publish it | High | Add it to `bc-map.md` and the bonus-review `public/` types before the first sync task (ADR 0006) | Tech Lead |
+| Jira API details (deleted-worklog feed, JQL minute precision) were not checked against Atlassian docs | Medium | Spike on a sandbox site with recorded fixtures before ADR 0003/0004 tasks | Backend |
+| Atlassian rate limits on large sites could push throttling failures above 1% | Medium | Per-site concurrency 1, retry hint back-off, alert on the monthly ratio | Backend |
+| Scaffold S9 (outbox + relay) is not built; this feature cannot publish events without it | High | Treat S9 as a hard dependency in break-tasks | Tech Lead |
+| `.claude/rules/integrations-jira.md` still names the issue key as the upsert key | Low | Update the rule in the first implementation task (ADR 0002) | Backend |
+| Open architectural decision: can two Teams pick the same Jira Project, and does a shared issue count for both? | Open question | Resolve before break-tasks; current default: allowed, each Team counts only its own matched Members (PRD §8) | PM + Tech Lead |
 
 **Accepted debt (acceptable in v1, plan to fix later):**
-- <e.g. Goal entity is not versioned (immutable) — OK for v1, may need audit versioning in v2>
+- Polling only, no Jira webhooks — freshness is daily, not near-real-time.
+- No backfill: Team Baseline stays empty for the first months (PRD §3).
 
 ## 12. Glossary
 
