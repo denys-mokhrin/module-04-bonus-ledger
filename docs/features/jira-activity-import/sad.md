@@ -115,50 +115,61 @@ Each tactical decision in later sections should be traceable to one of these str
 
 ## 5. Building block view
 
-<!-- 🎯 Навіщо: ВНУТРІШНЯ ДЕКОМПОЗИЦІЯ — модулі, контейнери, БД. Статична топологія:   -->
-<!--           хто з ким може говорити. Без §5 §6 (сценарії) не має словника учасників. -->
-<!-- 📋 Що писати: 1 абзац про стиль (шари/гексагональна/clean/на подіях) +            -->
-<!--           дерево папок + Mermaid C4Container.                                       -->
-<!-- 📌 ОДИН Container на кожну оголошену target_surface (frontmatter): fullstack        -->
-<!--           [backend-service, web-frontend] = backend-API container + web/SPA container; -->
-<!--           [backend-service, mobile-app] = API + mobile app. Container(web, …) нижче — -->
-<!--           лише приклад однієї поверхні; додай/заміни під оголошене у §4. → _shared/surfaces.md -->
-<!-- 📌 Приклад: «web-app, content-api, media-worker, postgres, s3, cdn».                -->
-
-<One paragraph: layered / hexagonal / clean / event-driven. Why.>
+All code lives in the existing `integrations` context (handler / service / repo per feature, provider code under `jira/` as the anti-corruption layer). The context talks to others only through events in its outbox and through `public/` facades; it never reads another context's schema.
 
 **Internal decomposition:**
 
 ```
-<e.g. internal/modules/goals/>
-├── domain/       <entities + sentinel errors>
-├── app/          <use cases / services>
-├── infra/        <repository + outbox impl>
-├── ports/        <HTTP handlers, DTOs, error mapping>
-└── module.go     <self-wiring>
+src/modules/integrations/
+├── integrations.module.ts
+├── public/                 event types: JiraConnected, IssuesImported, WorklogsImported, JiraUserMatched
+├── connections/            Connection + Jira Projects: controller / service / repo (US-01, US-02)
+├── sync/                   Sync Run scheduler, Final Pass, checkpoints, period read model (US-03)
+├── health/                 Import Health query + Import Alerts (US-04, US-05)
+├── matching/               Jira User ↔ Member matches, "not on this Team" marks (US-06, US-08)
+├── jira/                   ACL: OAuth client, REST client with back-off, mapper (customfield_* only here)
+└── db/                     schema.prisma, migrations/, client.ts (integrations schema + outbox)
 ```
 
 **C4 Container (L2):**
 
 ```mermaid
 C4Container
-    title <system> — Containers
+    title Bonus Ledger: Jira activity import - Containers
 
-    Person(user, "<User>")
+    Person(lead, "Team Lead", "Connects, reads Import Health, matches users")
+    Person(hr, "HR Reviewer", "Reads Import Health")
 
-    Container_Boundary(boundary, "<Our System>") {
-        Container(web, "<Web/API container>", "<technology>", "<purpose>")
-        Container(svc, "<Service container>", "<technology>", "<purpose>")
-        ContainerDb(db, "<DB>", "<technology>", "<purpose>")
+    Container_Boundary(app, "Bonus Ledger modular monolith (NestJS 11)") {
+        Container(api, "integrations API", "NestJS controllers", "Connections, Jira Projects, Import Health, Jira User matches")
+        Container(sync, "Sync Run jobs", "BullMQ processors in the same deployable", "Daily Sync Runs, Final Pass, reconciliation, Import Alerts")
+        Container(identity, "identity", "NestJS module", "TeamDirectory facade: roles per Team and Company")
+        Container(review, "bonus-review", "NestJS module", "Bonus Period state")
+        Container(contribution, "contribution", "NestJS module", "Consumes imported activity")
+        Container(billing, "billing", "NestJS module", "Subscription state")
     }
 
-    System_Ext(ext, "<External>", "<purpose>")
+    ContainerDb(pg, "PostgreSQL 16", "integrations schema", "Connections, Sync Runs, Imported Issues, Worklogs, matches, alerts, outbox")
+    ContainerQueue(redis, "Redis + BullMQ", "Queues", "Sync Run schedules and outbox relay")
+    System_Ext(jira, "Jira Cloud", "Issues, Worklogs, field metadata")
 
-    Rel(user, web, "<interaction>", "<protocol>")
-    Rel(web, svc, "<service calls>")
-    Rel(svc, db, "<reads/writes>", "<driver>")
-    Rel(svc, ext, "<emits>", "<protocol>")
+    Rel(lead, api, "Connects, matches, reads health", "HTTPS/REST")
+    Rel(hr, api, "Reads Import Health", "HTTPS/REST")
+    Rel(api, identity, "Checks Team role", "facade call")
+    Rel(api, pg, "Reads and writes", "Prisma")
+    Rel(api, redis, "Schedules Sync Runs", "BullMQ")
+    Rel(redis, sync, "Triggers jobs", "BullMQ")
+    Rel(sync, jira, "Reads activity", "HTTPS")
+    Rel(sync, pg, "Upserts snapshots, writes outbox", "Prisma")
+    Rel(review, sync, "Bonus Period state events", "event")
+    Rel(billing, sync, "SubscriptionSuspended, SubscriptionActivated", "event")
+    Rel(sync, contribution, "IssuesImported, WorklogsImported, JiraUserMatched", "event")
 ```
+
+**Building-block decisions:**
+
+- **Attribution travels as events from `integrations`.** A Jira User match, unmatch or "not on this Team" mark is written with a `JiraUserMatched` outbox event in the same transaction; Contribution Scoring re-attributes the activity of every Open Bonus Period at once, without a Sync Run (AC-19, AC-28, AC-29). → [ADR 0005](./adr/0005-publish-jira-user-matches-as-events-for-immediate-attribution.md)
+- **The import follows the Bonus Period from Bonus Review events.** `integrations` keeps a local read model of each Team's Bonus Periods from `BonusPeriodOpened`, a new `BonusPeriodReviewStarted` and `BonusPeriodClosed`; Sync Runs and attribution changes stop for a period as soon as it leaves Open (AC-22, AC-26). → [ADR 0006](./adr/0006-follow-bonus-period-state-through-bonus-review-events.md)
 
 ## 6. Runtime view
 
