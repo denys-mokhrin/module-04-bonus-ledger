@@ -20,7 +20,7 @@ Every later step of Bonus Ledger — Contribution Score, Justification, HR appro
 
 The feature blocks the whole MVP: scoring, justification drafts and HR review all consume imported activity, and SPEC goal 1 ("a team lead connects a Jira project and gets every member's monthly contribution score") starts here. There is no external deadline.
 
-Committed approach (idea-brief §13, Approach C — scheduled import with health signal): the Team Lead connects the Team's Jira site once and picks its projects; activity is imported daily during the open Bonus Period plus a Final Pass after month end; the Team Lead sees a per-Team Import Health and receives Import Alerts for access loss, a missing story-point field, unmatched Jira Users and projects with no activity; imported data is frozen once the Bonus Period is closed.
+Committed approach (idea-brief §13, Approach C — scheduled import with health signal): the Team Lead connects the Team's Jira site once and picks its projects; activity is imported daily during the open Bonus Period plus a Final Pass after month end; the Team Lead sees a per-Team Import Health and receives Import Alerts for access loss, a missing story-point field, unmatched Jira Users and projects with no activity; imported data is frozen once the Bonus Period is closed. Around month end a Team can have two Open Bonus Periods at once (the ended month waiting for review and the current month); daily Sync Runs cover the current month, the Final Pass covers the ended month, and the Team Lead's changes (projects, matches) apply to every Open Bonus Period.
 
 Traceability: the existing system already separates contexts (Jira Integration owns Connections, Sync Runs and Imported Issues; Bonus Review owns the Bonus Period; Contribution Scoring consumes imported activity) and requires that a re-run of the same import window publishes no duplicate activity (`.claude/rules/integrations.md`). Import design proposals in `.notes/decisions.md` (stable issue identity, change detection, deletion detection) are not confirmed and are left to architecture-design. The reference module contributes the "unknown or another company's — same answer" pattern used in the authorization criteria.
 
@@ -122,7 +122,7 @@ Critic amendments accepted (sdlc:critic, 2026-11-24): a failed Final Pass is ret
 
 **Given** a Team with a Connection and an open Bonus Period
 **When** the Team Lead adds a project of the connected site to the Team
-**Then** the next daily Sync Run imports that project's activity for the whole open Bonus Period, not only from the day it was added
+**Then** the next scheduled Sync Run imports that project's activity for every Open Bonus Period of the Team, from the first day of each period and not only from the day it was added
 
 ### AC-06 (US-02) — domain invariant
 
@@ -170,7 +170,7 @@ Critic amendments accepted (sdlc:critic, 2026-11-24): a failed Final Pass is ret
 
 **Given** a Team with a Connection
 **When** the Team Lead opens the Team's Import Health
-**Then** the Team Lead sees the time of the last successful Sync Run, every open Import Alert, and the number of Imported Issues and Worklogs per project for the open Bonus Period
+**Then** the Team Lead sees the time of the last successful Sync Run, every open Import Alert, and — separately for each Open Bonus Period — the number of Imported Issues and Worklogs per project
 
 ### AC-14 (US-04) — authorization
 
@@ -182,31 +182,31 @@ Critic amendments accepted (sdlc:critic, 2026-11-24): a failed Final Pass is ret
 
 **Given** a Team whose Connection lost access to Jira (revoked authorisation or the connecting account lost its rights)
 **When** the daily Sync Run tries to import
-**Then** the Sync Run fails without removing any activity already imported, and the Team Lead gets an Import Alert that access is lost and the Team must reconnect
+**Then** the Sync Run fails without removing any activity already imported, and the Team Lead gets an Import Alert that access is lost and the Connection must be re-authorised
 
 ### AC-16 (US-05) — happy path
 
 **Given** a Connection that lost access during the open Bonus Period
-**When** the Team Lead restores access before the Bonus Period leaves Open
+**When** a Team Lead of that Team re-authorises the existing Connection to the same Jira site before the Bonus Period leaves Open, keeping its projects and Jira User matches
 **Then** the next scheduled Sync Run (a daily Sync Run, or the Final Pass retry if the month has already ended) imports the whole Bonus Period again, the access-lost Import Alert closes, and no month of activity is lost
 
 ### AC-17 (US-05) — error
 
 **Given** a Team project in which the story-point field cannot be found
 **When** a Sync Run imports that project
-**Then** its issues are imported without story points and the Team Lead gets an Import Alert naming the project and the missing field
+**Then** its issues are imported without story points and the Team Lead gets an Import Alert naming the project and the missing field; the field is found by the system, not picked in Bonus Ledger, so the fix is made in Jira and the alert closes after the first Sync Run that finds the field
 
 ### AC-18 (US-05) — domain invariant
 
-**Given** a Team project that has returned no issues and no Worklogs for the open Bonus Period for 7 days in a row
+**Given** a Team project with no new or changed issues and no new Worklogs in the last 7 calendar days (counted from the day the project was added, if later)
 **When** the next daily Sync Run or the Final Pass finishes
-**Then** the Team Lead gets an Import Alert naming the project while the Bonus Period is still Open, so a project the Connection cannot see is not mistaken for a quiet month
+**Then** the Team Lead gets an Import Alert naming the project while the Bonus Period is still Open, so a project the Connection cannot see is not mistaken for a quiet month; the alert closes when a Sync Run finds new activity in that project or the project is removed
 
 ### AC-19 (US-06) — happy path
 
 **Given** a Sync Run found activity of a Jira User who is not matched to any Member
 **When** the Team Lead matches that Jira User to a Member of the Team
-**Then** that Jira User's activity in the open Bonus Period is attributed to the Member from the next Sync Run, and the unmatched-user Import Alert closes
+**Then** that Jira User's activity in every Open Bonus Period is attributed to the Member right away, without waiting for a Sync Run (also after a successful Final Pass), and the unmatched-user Import Alert closes; periods that are In Review or Closed do not change
 
 ### AC-20 (US-06) — authorization
 
@@ -250,6 +250,24 @@ Critic amendments accepted (sdlc:critic, 2026-11-24): a failed Final Pass is ret
 **When** issues or Worklogs of that month change in Jira
 **Then** no Sync Run changes the period's activity, and the HR Reviewer sees exactly the activity of the successful Final Pass
 
+### AC-27 (US-02) — domain invariant
+
+**Given** activity imported into an Open Bonus Period
+**When** it leaves the Team's scope — its project is removed from the Team, the issue moves to a project that is not the Team's, or the issue or Worklog is deleted in Jira
+**Then** after the next scheduled Sync Run that activity no longer counts in any Open Bonus Period and Contribution Scoring is told once; periods that are In Review or Closed do not change
+
+### AC-28 (US-06) — happy path
+
+**Given** an unmatched Jira User who is not part of the Team (for example a contractor or a member of another Team)
+**When** the Team Lead marks that Jira User as not on this Team
+**Then** the unmatched-user Import Alert closes, the Jira User's activity is never attributed to a Member of this Team, and it is left out of the attribution KPI; the Team Lead can undo the mark
+
+### AC-29 (US-06) — happy path
+
+**Given** a Member matched to a Jira User by mistake
+**When** the Team Lead removes the match and matches the Jira User to the right Member
+**Then** the Jira User's activity in every Open Bonus Period moves to the right Member right away, periods that are In Review or Closed do not change, and both the unmatch and the new match are recorded with who did it and when
+
 ## 6. Non-functional requirements
 
 | Aspect | Target | Measurement |
@@ -266,7 +284,7 @@ Critic amendments accepted (sdlc:critic, 2026-11-24): a failed Final Pass is ret
 
 - **Data classification:** confidential — per-person work activity is used to decide bonuses and must not leak between Teams or companies.
 - **Personal data touched:** Jira User account identifier and display name (internal), email address when Jira exposes it (personal), Worklog author, date and duration (personal, bonus-relevant), issue assignee history (internal). Raw issue comments are not imported.
-- **AuthZ/AuthN impact:** new capabilities — manage the Team's Connection and projects (Team Lead of that Team only), match Jira Users to Members (Team Lead of that Team only), read Import Health (that Team Lead and HR Reviewers of the same company). The Jira access credential is never shown back to anyone after connecting and is stored encrypted.
+- **AuthZ/AuthN impact:** new capabilities — manage and re-authorise the Team's Connection and projects (Team Lead of that Team only), match, unmatch and mark Jira Users as not on this Team (Team Lead of that Team only), read Import Health (that Team Lead and HR Reviewers of the same company). The Jira access credential is never shown back to anyone after connecting and is stored encrypted.
 - **Abuse cases:**
   - Cross-tenant access to another company's Connection or Import Health: denied with the same answer as "does not exist", so nothing about the other company is revealed.
   - Credential leak: the stored Jira credential is never returned, logged or included in alerts; access is read-only and limited to what import needs.
@@ -279,7 +297,7 @@ Critic amendments accepted (sdlc:critic, 2026-11-24): a failed Final Pass is ret
 
 - **Bonus Periods imported with zero manual action** — baseline: 0% (no import exists), target: ≥ 90% of Bonus Periods of connected Teams within 3 months of the first pilot.
 - **Time from connecting to first successful Sync Run** — baseline: 0 (new), target: ≤ 24 h for ≥ 95% of new Connections within the first month.
-- **Activity attributed to Members at Final Pass** — baseline: 0 (new), target: ≥ 98% of imported Worklog time attributed to a Member at the Final Pass, within 2 months.
+- **Activity attributed to Members at Final Pass** — baseline: 0 (new), target: ≥ 98% of imported Worklog time attributed to a Member at the Final Pass (activity of Jira Users marked as not on this Team excluded), within 2 months.
 - **Access-lost Import Alerts still open at month end** — baseline: 0 (new), target: ≤ 5% of Connections per month, measured over the first quarter.
 - **Justifications returned by HR for data reasons** — baseline: TBD (Bonus Review does not exist yet); measurement plan: Bonus Review records a return reason, counted monthly from the first reviewed period; target: ≤ 5% within 3 months.
 
@@ -287,4 +305,6 @@ Critic amendments accepted (sdlc:critic, 2026-11-24): a failed Final Pass is ret
 
 - [ ] Which Bonus Period does an issue's activity belong to when it spans months (Worklogs by the day they cover; story points by the day the issue was resolved)? Default now: Worklogs by the date they cover, story points by the resolution date in the company's timezone. — owner: Tech Lead, due: before /sdlc:architecture-design
 - [ ] What happens when the Final Pass failed and Bonus Review moves the period to In Review — should it be held back? Default now: not held back; the HR Reviewer sees the failed Final Pass (AC-23). — owner: PM + HR, due: before /sdlc:clarify-prd
+- [ ] Can two Teams pick the same Jira project, and does a shared issue count for both? Default now: allowed; each Team counts only the activity of its own matched Members. — owner: PM + Tech Lead, due: before /sdlc:architecture-design
+- [ ] Can a Team Lead disconnect the Team or move it to another Jira site, and what happens to imported activity? Default now: not in this feature; re-authorising keeps the same site. — owner: PM, due: 2026-12-15
 - [ ] Validate the import pain with 2–3 Team Leads (the problem is still a hypothesis). Default now: proceed on the hypothesis. — owner: PM, due: 2026-12-15
